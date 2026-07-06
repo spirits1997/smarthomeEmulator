@@ -20,8 +20,6 @@ package kr.or.kashi.hde.session;
 import android.util.Log;
 
 import java.io.File;
-import java.io.IOException;
-import java.io.RandomAccessFile;
 import java.util.Arrays;
 
 /**
@@ -40,11 +38,9 @@ public class DirectTtyNetworkSession extends NetworkSessionAdapter {
     private final String mPortName;
     private final int mPortSpeed;
 
-    private RandomAccessFile mTty;
+    private int mNativeFd = -1;
     private Thread mReadThread;
     private volatile boolean mRunning;
-    private boolean mBoardDriverRs485Configured;
-    private Rs485DirectionControl mRs485DirectionControl;
 
     public DirectTtyNetworkSession(String name, int speed) {
         mPortName = name;
@@ -65,17 +61,12 @@ public class DirectTtyNetworkSession extends NetworkSessionAdapter {
             return false;
         }
 
-        configurePortByStty(mPortName, mPortSpeed);
-
-        try {
-            mTty = new RandomAccessFile(portFile, "rw");
-        } catch (IOException e) {
-            Log.e(TAG, "open failed: " + mPortName, e);
+        mNativeFd = NativeTtyPort.open(mPortName, mPortSpeed);
+        if (mNativeFd < 0) {
+            Log.e(TAG, "native open/configure failed: " + mPortName);
             closeQuietly();
             return false;
         }
-
-        configureBoardRs485IfNeeded();
 
         mRunning = true;
         mReadThread = new Thread(this::readLoop, "DirectTty-RX-" + portFile.getName());
@@ -102,12 +93,6 @@ public class DirectTtyNetworkSession extends NetworkSessionAdapter {
             mReadThread = null;
         }
 
-        if (mRs485DirectionControl != null) {
-            mRs485DirectionControl.close();
-            mRs485DirectionControl = null;
-        }
-        mBoardDriverRs485Configured = false;
-
         Log.d(TAG, "closed internal UART port " + mPortName);
     }
 
@@ -115,8 +100,7 @@ public class DirectTtyNetworkSession extends NetworkSessionAdapter {
     public void onWrite(byte[] b) {
         if (b == null || b.length == 0) return;
 
-        RandomAccessFile tty = mTty;
-        if (tty == null) {
+        if (mNativeFd < 0) {
             Log.e(TAG, "write failed: port is not opened");
             return;
         }
@@ -124,65 +108,31 @@ public class DirectTtyNetworkSession extends NetworkSessionAdapter {
         try {
             Thread.sleep(WRITE_DELAY_MS);
             synchronized (this) {
-                Rs485DirectionControl directionControl = mBoardDriverRs485Configured
-                        ? null : mRs485DirectionControl;
-                if (directionControl != null) {
-                    directionControl.beforeTx();
-                }
-                tty.write(b);
-                if (directionControl != null) {
-                    directionControl.afterTx(b.length, mPortSpeed);
+                int written = NativeTtyPort.write(mNativeFd, b, b.length);
+                if (written != b.length) {
+                    Log.e(TAG, "native write incomplete: " + mPortName
+                            + " written=" + written + " expected=" + b.length);
                 }
             }
         } catch (InterruptedException e) {
             Thread.currentThread().interrupt();
             Log.w(TAG, "write interrupted");
-        } catch (IOException e) {
-            Log.e(TAG, "write failed: " + mPortName, e);
-        }
-    }
-
-    private void configureBoardRs485IfNeeded() {
-        if (!BoardUartRs485Configurator.isBoardRs485Port(mPortName)) {
-            return;
-        }
-
-        mBoardDriverRs485Configured = BoardUartRs485Configurator.configure(mPortName);
-        if (mBoardDriverRs485Configured) {
-            Log.d(TAG, "board RS485 driver direction control enabled: " + mPortName);
-            return;
-        }
-
-        Log.w(TAG, "board RS485 ioctl setup failed; fallback to manual GPIO direction control: "
-                + mPortName);
-        mRs485DirectionControl = Rs485DirectionControl.createIfNeeded(mPortName);
-        if (mRs485DirectionControl != null && !mRs485DirectionControl.open()) {
-            Log.w(TAG, "manual RS485 direction GPIO setup failed; TX may not leave the bus: "
-                    + mPortName);
-            mRs485DirectionControl = null;
         }
     }
 
     private void readLoop() {
         byte[] buffer = new byte[READ_BUFFER_SIZE];
         while (mRunning) {
-            RandomAccessFile tty = mTty;
-            if (tty == null) break;
+            int fd = mNativeFd;
+            if (fd < 0) break;
 
-            try {
-                int readLen = tty.read(buffer);
-                if (readLen > 0) {
-                    byte[] data = Arrays.copyOf(buffer, readLen);
-                    putData(data);
-                } else if (readLen < 0) {
-                    Thread.sleep(10);
-                }
-            } catch (InterruptedException e) {
-                Thread.currentThread().interrupt();
-                break;
-            } catch (IOException e) {
+            int readLen = NativeTtyPort.read(fd, buffer, buffer.length, 200);
+            if (readLen > 0) {
+                byte[] data = Arrays.copyOf(buffer, readLen);
+                putData(data);
+            } else if (readLen < 0) {
                 if (mRunning) {
-                    Log.e(TAG, "read failed: " + mPortName, e);
+                    Log.e(TAG, "native read failed: " + mPortName);
                 }
                 break;
             }
@@ -191,38 +141,12 @@ public class DirectTtyNetworkSession extends NetworkSessionAdapter {
     }
 
     private void closeQuietly() {
-        RandomAccessFile tty = mTty;
-        mTty = null;
-        if (tty != null) {
-            try {
-                tty.close();
-            } catch (IOException e) {
-                Log.w(TAG, "close failed: " + mPortName, e);
-            }
+        int fd = mNativeFd;
+        mNativeFd = -1;
+        if (fd >= 0) {
+            NativeTtyPort.close(fd);
         }
     }
 
-    private static void configurePortByStty(String portName, int speed) {
-        String[] sttyPaths = new String[] { "/system/bin/stty", "/vendor/bin/stty", "stty" };
-        for (String stty : sttyPaths) {
-            try {
-                Process process = new ProcessBuilder(
-                        stty, "-F", portName,
-                        String.valueOf(speed),
-                        "cs8", "-cstopb", "-parenb",
-                        "raw", "-echo", "-echoe", "-echok", "-ixon", "-ixoff")
-                        .redirectErrorStream(true)
-                        .start();
-                int exit = process.waitFor();
-                if (exit == 0) {
-                    Log.d(TAG, "UART configured: " + portName + " " + speed + " by " + stty);
-                    return;
-                }
-                Log.w(TAG, "stty failed: path=" + stty + ", exit=" + exit);
-            } catch (Exception e) {
-                Log.w(TAG, "stty unavailable: " + stty + " for " + portName + ", " + e.getMessage());
-            }
-        }
-        Log.w(TAG, "UART stty configuration failed; try direct open anyway: " + portName + " " + speed);
-    }
+
 }

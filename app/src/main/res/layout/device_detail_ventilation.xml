@@ -75,12 +75,14 @@
                 android:id="@+id/mode_cleanair_radio"
                 android:layout_width="wrap_content"
                 android:layout_height="wrap_content"
+                android:visibility="gone"
                 android:text="CLEANAIR" />
 
             <RadioButton
                 android:id="@+id/mode_internal_radio"
                 android:layout_width="wrap_content"
                 android:layout_height="wrap_content"
+                android:visibility="gone"
                 android:text="INTERNAL" />
 
         </kr.or.kashi.hde.widget.FlowRadioGroup>
@@ -235,7 +237,9 @@
         <CheckBox
             android:id="@+id/off_timer_check"
             android:text="Off Timer:"
-            style="@style/TitleCheckStyle" />
+            style="@style/TitleCheckStyle"
+            android:clickable="true"
+            android:focusable="true" />
 
         <EditText
             android:id="@+id/off_timer_hour_edit"

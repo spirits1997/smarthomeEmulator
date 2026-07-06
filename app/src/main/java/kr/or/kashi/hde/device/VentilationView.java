@@ -127,6 +127,12 @@ public class VentilationView extends HomeDeviceView<Ventilation> {
         mBaseVentCheck = findViewById(R.id.base_vent_check);
         mBaseVentCheck.setOnClickListener(v -> setBaseVent());
         mOffTimerCheck = findViewById(R.id.off_timer_check);
+        // TitleCheckStyle is non-clickable for section labels by default.
+        // Off Timer is an actual control, so explicitly enable it and send
+        // the timer command when the user checks/unchecks it.
+        mOffTimerCheck.setClickable(true);
+        mOffTimerCheck.setEnabled(true);
+        mOffTimerCheck.setOnClickListener(v -> setOffTimer());
         mOffTimerHourEdit = findViewById(R.id.off_timer_hour_edit);
         mOffTimerMinuteEdit = findViewById(R.id.off_timer_minute_edit);
         mOffTimerSetButton = findViewById(R.id.off_timer_set_button);
@@ -226,11 +232,30 @@ public class VentilationView extends HomeDeviceView<Ventilation> {
     }
 
     private void setOffTimer() {
+        boolean enabled = mOffTimerCheck.isChecked();
         int hour = parseInteger(mOffTimerHourEdit.getText().toString(), 0);
         int minute = parseInteger(mOffTimerMinuteEdit.getText().toString(), 0);
+
+        if (enabled) {
+            hour = clamp(hour, 1, 24);
+            minute = clamp(minute, 0, 60);
+        } else {
+            hour = 0;
+            minute = 0;
+        }
+
+        if (!mOffTimerHourEdit.hasFocus()) mOffTimerHourEdit.setText(String.valueOf(hour));
+        if (!mOffTimerMinuteEdit.hasFocus()) mOffTimerMinuteEdit.setText(String.valueOf(minute));
+
         device().setProperty(Ventilation.PROP_OFF_TIMER_HOUR, Integer.class, hour);
         device().setProperty(Ventilation.PROP_OFF_TIMER_MINUTE, Integer.class, minute);
-        device().setProperty(Ventilation.PROP_OFF_TIMER_ENABLED, Boolean.class, mOffTimerCheck.isChecked());
+        device().setProperty(Ventilation.PROP_OFF_TIMER_ENABLED, Boolean.class, enabled);
+    }
+
+    private int clamp(int value, int min, int max) {
+        if (value < min) return min;
+        if (value > max) return max;
+        return value;
     }
 
     private int parseInteger(String value, int fallback) {
