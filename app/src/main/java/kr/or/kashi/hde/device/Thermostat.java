@@ -36,6 +36,7 @@ public class Thermostat extends HomeDevice {
         long OUTING_SETTING = 1L << 2;
         long HOTWATER_ONLY = 1L << 3;
         long RESERVED_MODE = 1L << 4;
+        long REPEAT_MODE = 1L << 5;
     }
 
     /**
@@ -77,6 +78,22 @@ public class Thermostat extends HomeDevice {
     /** Property: Resolution value of temperature (1.0, 0.5, 0.1 or ...) */
     @PropertyDef(valueClass=Float.class, defValueF=1.0f)
     public static final String PROP_TEMP_RESOLUTION         = PROP_PREFIX + "temperature.resolution";
+
+    /** Property: Reserved mode hour field. */
+    @PropertyDef(valueClass=Integer.class, defValueI=1)
+    public static final String PROP_RESERVED_HOUR           = PROP_PREFIX + "reserved.hour";
+
+    /** Property: Reserved mode minute field. */
+    @PropertyDef(valueClass=Integer.class, defValueI=30)
+    public static final String PROP_RESERVED_MINUTE         = PROP_PREFIX + "reserved.minute";
+
+    /** Property: Repeat mode hour field. */
+    @PropertyDef(valueClass=Integer.class, defValueI=0)
+    public static final String PROP_REPEAT_HOUR             = PROP_PREFIX + "repeat.hour";
+
+    /** Property: Repeat mode minute field. */
+    @PropertyDef(valueClass=Integer.class, defValueI=10)
+    public static final String PROP_REPEAT_MINUTE           = PROP_PREFIX + "repeat.minute";
 
     /** Property: Temperature that has been set to device */
     @PropertyDef(valueClass=Float.class)

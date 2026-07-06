@@ -43,6 +43,13 @@ public class ThermostatView extends HomeDeviceView<Thermostat> {
     private CheckBox mOutingSettingCheck;
     private CheckBox mHotwaterOnlyCheck;
     private CheckBox mReservedModeCheck;
+    private CheckBox mRepeatModeCheck;
+    private EditText mReservedHourEdit;
+    private EditText mReservedMinuteEdit;
+    private Button mReservedSetButton;
+    private EditText mRepeatHourEdit;
+    private EditText mRepeatMinuteEdit;
+    private Button mRepeatSetButton;
     private CheckBox mTempRangeCheck;
     private TextView mTempRangeText;
     private CheckBox mCurrentTempCheck;
@@ -71,7 +78,17 @@ public class ThermostatView extends HomeDeviceView<Thermostat> {
         mHotwaterOnlyCheck = findViewById(R.id.function_hotwater_only_check);
         mHotwaterOnlyCheck.setOnClickListener(v -> setFunctions());
         mReservedModeCheck = findViewById(R.id.function_reserved_mode_check);
-        mReservedModeCheck.setOnClickListener(v -> setFunctions());
+        mReservedModeCheck.setOnClickListener(v -> setReservedTimer());
+        mRepeatModeCheck = findViewById(R.id.function_repeat_mode_check);
+        mRepeatModeCheck.setOnClickListener(v -> setRepeatTimer());
+        mReservedHourEdit = findViewById(R.id.reserved_hour_edit);
+        mReservedMinuteEdit = findViewById(R.id.reserved_minute_edit);
+        mReservedSetButton = findViewById(R.id.reserved_set_button);
+        mReservedSetButton.setOnClickListener(v -> setReservedTimer());
+        mRepeatHourEdit = findViewById(R.id.repeat_hour_edit);
+        mRepeatMinuteEdit = findViewById(R.id.repeat_minute_edit);
+        mRepeatSetButton = findViewById(R.id.repeat_set_button);
+        mRepeatSetButton.setOnClickListener(v -> setRepeatTimer());
         mTempRangeCheck = findViewById(R.id.temp_range_check);
         mTempRangeText = findViewById(R.id.temp_range_text);
         mCurrentTempCheck = findViewById(R.id.current_temp_check);
@@ -91,6 +108,7 @@ public class ThermostatView extends HomeDeviceView<Thermostat> {
         mOutingSettingCheck.setEnabled((supportedFunctions & Thermostat.Function.OUTING_SETTING) != 0);
         mHotwaterOnlyCheck.setEnabled((supportedFunctions & Thermostat.Function.HOTWATER_ONLY) != 0);
         mReservedModeCheck.setEnabled((supportedFunctions & Thermostat.Function.RESERVED_MODE) != 0);
+        mRepeatModeCheck.setEnabled((supportedFunctions & Thermostat.Function.REPEAT_MODE) != 0);
 
         final long functionStates = props.get(Thermostat.PROP_FUNCTION_STATES, Long.class);
         mHeatingCheck.setChecked((functionStates & Thermostat.Function.HEATING) != 0);
@@ -98,6 +116,12 @@ public class ThermostatView extends HomeDeviceView<Thermostat> {
         mOutingSettingCheck.setChecked((functionStates & Thermostat.Function.OUTING_SETTING) != 0);
         mHotwaterOnlyCheck.setChecked((functionStates & Thermostat.Function.HOTWATER_ONLY) != 0);
         mReservedModeCheck.setChecked((functionStates & Thermostat.Function.RESERVED_MODE) != 0);
+        mRepeatModeCheck.setChecked((functionStates & Thermostat.Function.REPEAT_MODE) != 0);
+
+        if (!mReservedHourEdit.hasFocus()) mReservedHourEdit.setText("" + props.get(Thermostat.PROP_RESERVED_HOUR, Integer.class));
+        if (!mReservedMinuteEdit.hasFocus()) mReservedMinuteEdit.setText("" + props.get(Thermostat.PROP_RESERVED_MINUTE, Integer.class));
+        if (!mRepeatHourEdit.hasFocus()) mRepeatHourEdit.setText("" + props.get(Thermostat.PROP_REPEAT_HOUR, Integer.class));
+        if (!mRepeatMinuteEdit.hasFocus()) mRepeatMinuteEdit.setText("" + props.get(Thermostat.PROP_REPEAT_MINUTE, Integer.class));
 
         final float minTemp = props.get(Thermostat.PROP_MIN_TEMPERATURE, Float.class);
         final float maxTemp = props.get(Thermostat.PROP_MAX_TEMPERATURE, Float.class);
@@ -119,6 +143,7 @@ public class ThermostatView extends HomeDeviceView<Thermostat> {
         if (mOutingSettingCheck.isChecked()) functions |= Thermostat.Function.OUTING_SETTING;
         if (mHotwaterOnlyCheck.isChecked()) functions |= Thermostat.Function.HOTWATER_ONLY;
         if (mReservedModeCheck.isChecked()) functions |= Thermostat.Function.RESERVED_MODE;
+        if (mRepeatModeCheck.isChecked()) functions |= Thermostat.Function.REPEAT_MODE;
         device().setProperty(Thermostat.PROP_FUNCTION_STATES, Long.class,  functions);
     }
 
@@ -126,5 +151,35 @@ public class ThermostatView extends HomeDeviceView<Thermostat> {
         final String editStr = mSettingTempEdit.getText().toString();
         float reqTemp = PropertyValue.newValueObject(Float.class, editStr);
         device().setProperty(Thermostat.PROP_SETTING_TEMPERATURE, Float.class, reqTemp);
+    }
+
+    private void setReservedTimer() {
+        device().setProperty(Thermostat.PROP_RESERVED_HOUR, Integer.class, parseInteger(mReservedHourEdit.getText().toString(), 1));
+        device().setProperty(Thermostat.PROP_RESERVED_MINUTE, Integer.class, parseInteger(mReservedMinuteEdit.getText().toString(), 30));
+        setFunctionBit(Thermostat.Function.RESERVED_MODE, mReservedModeCheck.isChecked());
+    }
+
+    private void setRepeatTimer() {
+        device().setProperty(Thermostat.PROP_REPEAT_HOUR, Integer.class, parseInteger(mRepeatHourEdit.getText().toString(), 0));
+        device().setProperty(Thermostat.PROP_REPEAT_MINUTE, Integer.class, parseInteger(mRepeatMinuteEdit.getText().toString(), 10));
+        setFunctionBit(Thermostat.Function.REPEAT_MODE, mRepeatModeCheck.isChecked());
+    }
+
+    private void setFunctionBit(long functionBit, boolean enabled) {
+        long functions = device().getProperty(Thermostat.PROP_FUNCTION_STATES, Long.class);
+        if (enabled) {
+            functions |= functionBit;
+        } else {
+            functions &= ~functionBit;
+        }
+        device().setProperty(Thermostat.PROP_FUNCTION_STATES, Long.class, functions);
+    }
+
+    private int parseInteger(String value, int fallback) {
+        try {
+            return Integer.parseInt(value);
+        } catch (NumberFormatException e) {
+            return fallback;
+        }
     }
 }

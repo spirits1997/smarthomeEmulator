@@ -86,7 +86,7 @@ public class Light extends HomeDevice {
     public static final String PROP_MAX_TONE_LEVEL  = PROP_PREFIX + "max_tone_level";
 
     /** Property: Current level of color tone */
-    @PropertyDef(valueClass=Integer.class)
+    @PropertyDef(valueClass=Integer.class, defValueI=0x0)
     public static final String PROP_CUR_TONE_LEVEL  = PROP_PREFIX + "cur_tone_level";
 
     /** Property: Whether if the type of switch is 3-way */

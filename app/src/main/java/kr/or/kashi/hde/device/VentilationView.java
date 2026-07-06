@@ -23,6 +23,8 @@ import android.widget.CheckBox;
 import android.widget.RadioButton;
 import android.widget.SeekBar;
 import android.widget.TextView;
+import android.widget.EditText;
+import android.widget.Button;
 
 import androidx.annotation.Nullable;
 
@@ -54,6 +56,12 @@ public class VentilationView extends HomeDeviceView<Ventilation> {
     private CheckBox mFanSpeedCheck;
     private TextView mFanSpeedText;
     private SeekBar mFanSpeedSeek;
+    private CheckBox mHoodLinkCheck;
+    private CheckBox mBaseVentCheck;
+    private CheckBox mOffTimerCheck;
+    private EditText mOffTimerHourEdit;
+    private EditText mOffTimerMinuteEdit;
+    private Button mOffTimerSetButton;
 
     public VentilationView(Context context, @Nullable AttributeSet attrs) {
         super(context, attrs);
@@ -113,6 +121,16 @@ public class VentilationView extends HomeDeviceView<Ventilation> {
                 setFanSpeed();
             }
         });
+
+        mHoodLinkCheck = findViewById(R.id.hood_link_check);
+        mHoodLinkCheck.setOnClickListener(v -> setHoodLink());
+        mBaseVentCheck = findViewById(R.id.base_vent_check);
+        mBaseVentCheck.setOnClickListener(v -> setBaseVent());
+        mOffTimerCheck = findViewById(R.id.off_timer_check);
+        mOffTimerHourEdit = findViewById(R.id.off_timer_hour_edit);
+        mOffTimerMinuteEdit = findViewById(R.id.off_timer_minute_edit);
+        mOffTimerSetButton = findViewById(R.id.off_timer_set_button);
+        mOffTimerSetButton.setOnClickListener(v -> setOffTimer());
     }
 
     @Override
@@ -154,6 +172,16 @@ public class VentilationView extends HomeDeviceView<Ventilation> {
         mFanSpeedSeek.setMin(minSpeed);
         mFanSpeedSeek.setMax(maxSpeed);
         mFanSpeedSeek.setProgress(curSpeed);
+
+        final long supportedFeatures = props.get(Ventilation.PROP_SUPPORTED_FEATURES, Long.class);
+        mHoodLinkCheck.setEnabled((supportedFeatures & Ventilation.Feature.HOOD_LINK) != 0);
+        mBaseVentCheck.setEnabled((supportedFeatures & Ventilation.Feature.BASE_VENT) != 0);
+        mHoodLinkCheck.setChecked(props.get(Ventilation.PROP_HOOD_LINK_STATE, Boolean.class));
+        mBaseVentCheck.setChecked(props.get(Ventilation.PROP_BASE_VENT_STATE, Boolean.class));
+
+        mOffTimerCheck.setChecked(props.get(Ventilation.PROP_OFF_TIMER_ENABLED, Boolean.class));
+        if (!mOffTimerHourEdit.hasFocus()) mOffTimerHourEdit.setText("" + props.get(Ventilation.PROP_OFF_TIMER_HOUR, Integer.class));
+        if (!mOffTimerMinuteEdit.hasFocus()) mOffTimerMinuteEdit.setText("" + props.get(Ventilation.PROP_OFF_TIMER_MINUTE, Integer.class));
     }
 
     private void setOperationMode() {
@@ -187,5 +215,29 @@ public class VentilationView extends HomeDeviceView<Ventilation> {
 
     private void setFanSpeed() {
         device().setProperty(Ventilation.PROP_CUR_FAN_SPEED, Integer.class, mFanSpeedSeek.getProgress());
+    }
+
+    private void setHoodLink() {
+        device().setProperty(Ventilation.PROP_HOOD_LINK_STATE, Boolean.class, mHoodLinkCheck.isChecked());
+    }
+
+    private void setBaseVent() {
+        device().setProperty(Ventilation.PROP_BASE_VENT_STATE, Boolean.class, mBaseVentCheck.isChecked());
+    }
+
+    private void setOffTimer() {
+        int hour = parseInteger(mOffTimerHourEdit.getText().toString(), 0);
+        int minute = parseInteger(mOffTimerMinuteEdit.getText().toString(), 0);
+        device().setProperty(Ventilation.PROP_OFF_TIMER_HOUR, Integer.class, hour);
+        device().setProperty(Ventilation.PROP_OFF_TIMER_MINUTE, Integer.class, minute);
+        device().setProperty(Ventilation.PROP_OFF_TIMER_ENABLED, Boolean.class, mOffTimerCheck.isChecked());
+    }
+
+    private int parseInteger(String value, int fallback) {
+        try {
+            return Integer.parseInt(value);
+        } catch (NumberFormatException e) {
+            return fallback;
+        }
     }
 }

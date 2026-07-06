@@ -138,8 +138,27 @@ public class UartSchedSession extends NetworkSessionAdapter {
 
     @Override
     public void onWrite(byte[] b) {
-        if (mUartSchedPort == null) return;
-        mUartSchedPort.schedulePacket(b, 0, 0, false);
+        sendRawPacket(b);
+    }
+
+    public boolean sendRawPacket(byte[] b) {
+        if (mUartSchedPort == null) {
+            Log.e(TAG, "sendRawPacket failed: port is not opened");
+            return false;
+        }
+        if (b == null || b.length == 0) {
+            Log.e(TAG, "sendRawPacket failed: empty packet");
+            return false;
+        }
+
+        byte[] packet = new byte[b.length];
+        System.arraycopy(b, 0, packet, 0, b.length);
+        long scheduleId = mUartSchedPort.schedulePacket(packet, 0, 0, false);
+        if (scheduleId < 0) {
+            Log.e(TAG, "sendRawPacket failed: scheduleId=" + scheduleId);
+            return false;
+        }
+        return true;
     }
 
     public boolean schedulePacket(PacketSchedule schedule) {

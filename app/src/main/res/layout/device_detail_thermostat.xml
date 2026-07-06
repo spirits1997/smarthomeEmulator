@@ -71,7 +71,90 @@
                 android:layout_height="wrap_content"
                 android:text="RESERVED_MODE" />
 
+            <CheckBox
+                android:id="@+id/function_repeat_mode_check"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="REPEAT_MODE" />
+
         </kr.or.kashi.hde.widget.FlowLayout>
+
+    </LinearLayout>
+
+
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:gravity="left|center_vertical"
+        android:orientation="horizontal">
+
+        <CheckBox
+            android:text="Reserved Timer:"
+            style="@style/TitleCheckStyle2" />
+
+        <EditText
+            android:id="@+id/reserved_hour_edit"
+            android:layout_width="50dp"
+            android:layout_height="wrap_content"
+            android:singleLine="true"
+            android:inputType="number"
+            android:text="1" />
+
+        <TextView android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="h" />
+
+        <EditText
+            android:id="@+id/reserved_minute_edit"
+            android:layout_width="50dp"
+            android:layout_height="wrap_content"
+            android:singleLine="true"
+            android:inputType="number"
+            android:text="0" />
+
+        <TextView android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="m" />
+
+        <Button
+            android:id="@+id/reserved_set_button"
+            android:layout_width="70dp"
+            android:layout_height="40dp"
+            android:text="Set" />
+
+    </LinearLayout>
+
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:gravity="left|center_vertical"
+        android:orientation="horizontal">
+
+        <CheckBox
+            android:text="Repeat Timer:"
+            style="@style/TitleCheckStyle2" />
+
+        <EditText
+            android:id="@+id/repeat_hour_edit"
+            android:layout_width="50dp"
+            android:layout_height="wrap_content"
+            android:singleLine="true"
+            android:inputType="number"
+            android:text="1" />
+
+        <TextView android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="h" />
+
+        <EditText
+            android:id="@+id/repeat_minute_edit"
+            android:layout_width="50dp"
+            android:layout_height="wrap_content"
+            android:singleLine="true"
+            android:inputType="number"
+            android:text="0" />
+
+        <TextView android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="m" />
+
+        <Button
+            android:id="@+id/repeat_set_button"
+            android:layout_width="70dp"
+            android:layout_height="40dp"
+            android:text="Set" />
 
     </LinearLayout>
 

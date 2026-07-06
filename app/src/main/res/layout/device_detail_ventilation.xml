@@ -194,4 +194,81 @@
 
     </LinearLayout>
 
+
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:gravity="left|top"
+        android:orientation="horizontal">
+
+        <CheckBox
+            android:text="Options:"
+            style="@style/TitleCheckStyle" />
+
+        <kr.or.kashi.hde.widget.FlowLayout
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:orientation="horizontal">
+
+            <CheckBox
+                android:id="@+id/hood_link_check"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="HOOD_LINK" />
+
+            <CheckBox
+                android:id="@+id/base_vent_check"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="BASE_VENT" />
+
+        </kr.or.kashi.hde.widget.FlowLayout>
+
+    </LinearLayout>
+
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:gravity="left|center_vertical"
+        android:orientation="horizontal">
+
+        <CheckBox
+            android:id="@+id/off_timer_check"
+            android:text="Off Timer:"
+            style="@style/TitleCheckStyle" />
+
+        <EditText
+            android:id="@+id/off_timer_hour_edit"
+            android:layout_width="50dp"
+            android:layout_height="wrap_content"
+            android:singleLine="true"
+            android:inputType="number"
+            android:text="0" />
+
+        <TextView
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="h" />
+
+        <EditText
+            android:id="@+id/off_timer_minute_edit"
+            android:layout_width="50dp"
+            android:layout_height="wrap_content"
+            android:singleLine="true"
+            android:inputType="number"
+            android:text="0" />
+
+        <TextView
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="m" />
+
+        <Button
+            android:id="@+id/off_timer_set_button"
+            android:layout_width="70dp"
+            android:layout_height="40dp"
+            android:text="Set" />
+
+    </LinearLayout>
+
 </kr.or.kashi.hde.device.VentilationView>

@@ -47,7 +47,15 @@ public class Ventilation extends HomeDevice {
      * Sensors that are installed in device
      */
     public @interface Sensor {
-        long CO2 = 1 << 0;
+        long CO2 = 1L << 0;
+    }
+
+    /**
+     * Supported option features.
+     */
+    public @interface Feature {
+        long HOOD_LINK = 1L << 0;
+        long BASE_VENT = 1L << 1;
     }
 
     /**
@@ -89,6 +97,10 @@ public class Ventilation extends HomeDevice {
     @PropertyDef(valueClass=Sensor.class, formatHint="bits")
     public static final String PROP_SUPPORTED_SENSORS   = PROP_PREFIX + "supported_sensors";
 
+    /** Property: Bits of supported {@link Feature}. */
+    @PropertyDef(valueClass=Feature.class, formatHint="bits")
+    public static final String PROP_SUPPORTED_FEATURES  = PROP_PREFIX + "supported_features";
+
     /** Property: Current operation mode. */
     @PropertyDef(valueClass=Mode.class)
     public static final String PROP_OPERATION_MODE      = PROP_PREFIX + "operation.mode";
@@ -96,6 +108,26 @@ public class Ventilation extends HomeDevice {
     /** Property: Bits of {@link Alarm} that is indicating of each alarmed state. */
     @PropertyDef(valueClass=Alarm.class, formatHint="bits")
     public static final String PROP_OPERATION_ALARM     = PROP_PREFIX + "operation.alarm";
+
+    /** Property: Hood-link operation state. */
+    @PropertyDef(valueClass=Boolean.class, defValueB=false)
+    public static final String PROP_HOOD_LINK_STATE     = PROP_PREFIX + "hood_link.state";
+
+    /** Property: Base ventilation operation state. */
+    @PropertyDef(valueClass=Boolean.class, defValueB=false)
+    public static final String PROP_BASE_VENT_STATE     = PROP_PREFIX + "base_vent.state";
+
+    /** Property: Off timer enabled state. */
+    @PropertyDef(valueClass=Boolean.class, defValueB=false)
+    public static final String PROP_OFF_TIMER_ENABLED   = PROP_PREFIX + "off_timer.enabled";
+
+    /** Property: Off timer hour field. */
+    @PropertyDef(valueClass=Integer.class, defValueI=0)
+    public static final String PROP_OFF_TIMER_HOUR      = PROP_PREFIX + "off_timer.hour";
+
+    /** Property: Off timer minute field. */
+    @PropertyDef(valueClass=Integer.class, defValueI=0)
+    public static final String PROP_OFF_TIMER_MINUTE    = PROP_PREFIX + "off_timer.minute";
 
     /** Property: Current speed of fan */
     @PropertyDef(valueClass=Integer.class)

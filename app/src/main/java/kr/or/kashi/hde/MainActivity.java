@@ -43,8 +43,8 @@ import java.io.File;
 import java.util.ArrayList;
 import java.util.List;
 
+import kr.or.kashi.hde.session.DirectTtyNetworkSession;
 import kr.or.kashi.hde.session.NetworkSession;
-import kr.or.kashi.hde.session.UartSchedSession;
 import kr.or.kashi.hde.session.UsbNetworkSession;
 import kr.or.kashi.hde.util.DebugLog;
 import kr.or.kashi.hde.util.LocalPreferences;
@@ -101,7 +101,7 @@ public class MainActivity extends AppCompatActivity {
         registerReceiver(mUsbReceiver, new IntentFilter(ACTION_USB_PERMISSION));
 
         mHandler = new Handler(Looper.getMainLooper());
-        McuWatchdogDisabler.sendOnceOnAppStart(mHandler);
+        McuWatchdogDisabler.sendOnceOnAppStart(this, mHandler);
         mInputMethodManager = (InputMethodManager) getSystemService(Context.INPUT_METHOD_SERVICE);
 
         mStartButton = findViewById(R.id.start_button);
@@ -173,17 +173,17 @@ public class MainActivity extends AppCompatActivity {
 
     private List<String> getAvailableInternalSerialPorts() {
         List<String> availablePorts = new ArrayList<>();
-        String[] allowedPorts = new String[] { "/dev/ttyS0", "/dev/ttyS4" };
+        String[] allowedPorts = new String[] { "/dev/ttyS0", "/dev/ttyS4", "/dev/ttyAS5" };
 
         File devDir = new File("/dev");
-        File[] ttyEntries = devDir.listFiles((dir, name) -> name.equals("ttyS0") || name.equals("ttyS4"));
+        File[] ttyEntries = devDir.listFiles((dir, name) -> name.equals("ttyS0") || name.equals("ttyS4") || name.equals("ttyAS5"));
         List<String> foundPorts = new ArrayList<>();
         if (ttyEntries != null) {
             for (File entry : ttyEntries) {
                 foundPorts.add(entry.getAbsolutePath());
             }
         }
-        Log.d(TAG, "Internal UART scan /dev allowed=[/dev/ttyS0, /dev/ttyS4], found=" + foundPorts);
+        Log.d(TAG, "Internal UART scan /dev allowed=[/dev/ttyS0, /dev/ttyS4, /dev/ttyAS5], found=" + foundPorts);
 
         for (String portPath : allowedPorts) {
             File portFile = new File(portPath);
@@ -204,20 +204,30 @@ public class MainActivity extends AppCompatActivity {
     }
 
     private String findInternalSerialPort() {
+        // Do not reject by manufacturer string. EVB and wallpad images expose
+        // different build properties, while the actual availability must be
+        // decided by /dev UART nodes.
         if (Build.MANUFACTURER.length() > 7 && !Build.MANUFACTURER.substring(3,5).equals("AV")) {
-            Log.e(TAG, "Internal port is not supported for manufacturer:" + Build.MANUFACTURER);
-            return null;
+            Log.w(TAG, "Internal UART manufacturer is not in old allow-list, but will scan /dev: "
+                    + Build.MANUFACTURER);
         }
 
         List<String> availablePorts = getAvailableInternalSerialPorts();
         if (availablePorts.isEmpty()) {
-            Log.e(TAG, "No internal UART port exists in /dev. allowed=[/dev/ttyS0, /dev/ttyS4]");
+            Log.e(TAG, "No internal UART port exists in /dev. allowed=[/dev/ttyS0, /dev/ttyS4, /dev/ttyAS5]");
             return null;
         }
 
         String preferredPort = "/dev/ttyS0";
         if (Build.MODEL.length() == 15 && Build.MODEL.substring(6,15).equals("NS-SAMPLE")) {
             preferredPort = "/dev/ttyS4";
+        }
+
+        // KOCOM wallpad boards expose the internal RS-485 emulator UART as /dev/ttyAS5.
+        // Prefer it whenever it exists so wallpad master/slave tests do not fall back to EVB ports.
+        if (availablePorts.contains("/dev/ttyAS5")) {
+            Log.d(TAG, "Internal UART selected wallpad port=/dev/ttyAS5");
+            return "/dev/ttyAS5";
         }
 
         if (availablePorts.contains(preferredPort)) {
@@ -244,12 +254,8 @@ public class MainActivity extends AppCompatActivity {
                     break;
                 }
 
-                try {
-                    networkSession = new UartSchedSession(this, mHandler, portPath, 9600);
-                } catch (RuntimeException e) {
-                    setStateText("ERROR: PORT IS NOT SUPPORTED!");
-                }
-                Log.d(TAG, "Internal network session created! port:" + portPath);
+                networkSession = new DirectTtyNetworkSession(portPath, 9600);
+                Log.d(TAG, "Internal direct-tty network session created! port:" + portPath);
                 break;
             }
 

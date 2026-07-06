@@ -47,10 +47,31 @@ public class KSThermostat extends KSDeviceContextBase {
     public static final int CMD_TEMPERATURE_RSP = 0xC4;
     public static final int CMD_OUTING_SETTING_REQ = 0x45;
     public static final int CMD_OUTING_SETTING_RSP = 0xC5;
-    public static final int CMD_RESERVED_MODE_REQ = 0x46;
-    public static final int CMD_RESERVED_MODE_RSP = 0xC6;
+    public static final int CMD_RESERVED_MODE_LEGACY_REQ = 0x46;
+    public static final int CMD_RESERVED_MODE_LEGACY_RSP = 0xC6;
+    public static final int CMD_RESERVED_MODE_REQ = 0x48;
+    public static final int CMD_RESERVED_MODE_RSP = 0xC8;
+    public static final int CMD_REPEAT_MODE_REQ = 0x49;
+    public static final int CMD_REPEAT_MODE_RSP = 0xC9;
     public static final int CMD_HOTWATER_ONLY_REQ = 0x47;
     public static final int CMD_HOTWATER_ONLY_RSP = 0xC7;
+
+    private static final int TIMER_MODE_OFF = 0x00;
+    private static final int TIMER_MODE_ON = 0x01;
+    private static final int TIMER_HOUR_DISABLED = 0;
+    private static final int TIMER_HOUR_MIN = 1;
+    private static final int TIMER_HOUR_MAX = 24;
+    private static final int TIMER_MINUTE_DISABLED = 0;
+    private static final int TIMER_MINUTE_MIN = 0;
+    private static final int TIMER_MINUTE_MAX = 60;
+    private static final int RESERVED_DEFAULT_HOUR = 1;
+    private static final int RESERVED_DEFAULT_MINUTE = 30;
+    private static final int REPEAT_HOUR_MIN = 1;
+    private static final int REPEAT_DEFAULT_HOUR = 1;
+    private static final int REPEAT_DEFAULT_MINUTE = 10;
+    private static final long CONTROL_REPEAT_NONE = 0L;
+    // KSDeviceContextBase repeatCount is additional-send count, so 2 means total 3 frames.
+    private static final long CONTROL_REPEAT_TOTAL_3 = 2L;
 
     private int mManufacturerId = 0;
     private int mTemperatureDetectingType = 0; // 1:by air, 2:by returning-water
@@ -67,19 +88,37 @@ public class KSThermostat extends KSDeviceContextBase {
             setPropertyTask(HomeDevice.PROP_ONOFF, this::onPowerControlTask);
             setPropertyTask(Thermostat.PROP_FUNCTION_STATES, this::onFunctionControlTask);
             setPropertyTask(Thermostat.PROP_SETTING_TEMPERATURE, this::onTemperatureControlTask);
+            setPropertyTask(Thermostat.PROP_RESERVED_HOUR, this::onReservedTimerControlTask);
+            setPropertyTask(Thermostat.PROP_REPEAT_HOUR, this::onRepeatTimerControlTask);
+            setPropertyTask(Thermostat.PROP_REPEAT_MINUTE, this::onRepeatTimerControlTask);
         } else {
+            // In slave(device) mode, UI changes are local device-state changes.
+            // Reflect the state and notify the wallpad with the matching control response
+            // so timer DATA1/DATA2 can be observed without waiting for a wallpad request.
+            kr.or.kashi.hde.base.PropertyTask slaveReservedTimerTask = this::onSlaveReservedTimerControlTask;
+            kr.or.kashi.hde.base.PropertyTask slaveRepeatTimerTask = this::onSlaveRepeatTimerControlTask;
+            setPropertyTask(Thermostat.PROP_FUNCTION_STATES, this::onSlaveFunctionControlTask);
+            setPropertyTask(Thermostat.PROP_RESERVED_HOUR, slaveReservedTimerTask);
+            setPropertyTask(Thermostat.PROP_REPEAT_HOUR, slaveRepeatTimerTask);
+            setPropertyTask(Thermostat.PROP_REPEAT_MINUTE, slaveRepeatTimerTask);
+
             // TEMP: Initialize some properties as specific values in slave mode.
             long supportedFunctions = 0;
             supportedFunctions |= Thermostat.Function.HEATING;
             supportedFunctions |= Thermostat.Function.OUTING_SETTING;
             supportedFunctions |= Thermostat.Function.HOTWATER_ONLY;
             supportedFunctions |= Thermostat.Function.RESERVED_MODE;
+            supportedFunctions |= Thermostat.Function.REPEAT_MODE;
             mRxPropertyMap.put(Thermostat.PROP_SUPPORTED_FUNCTIONS, supportedFunctions);
             mRxPropertyMap.put(Thermostat.PROP_MIN_TEMPERATURE, mMinTemperature);
             mRxPropertyMap.put(Thermostat.PROP_MAX_TEMPERATURE, mMaxTemperature);
             mRxPropertyMap.put(Thermostat.PROP_TEMP_RESOLUTION, mSupportHalfDegree ? 0.5f : 1.0f);
             mRxPropertyMap.put(Thermostat.PROP_SETTING_TEMPERATURE, 10.0f);
             mRxPropertyMap.put(Thermostat.PROP_CURRENT_TEMPERATURE, 10.0f);
+            mRxPropertyMap.put(Thermostat.PROP_RESERVED_HOUR, RESERVED_DEFAULT_HOUR);
+            mRxPropertyMap.put(Thermostat.PROP_RESERVED_MINUTE, RESERVED_DEFAULT_MINUTE);
+            mRxPropertyMap.put(Thermostat.PROP_REPEAT_HOUR, REPEAT_DEFAULT_HOUR);
+            mRxPropertyMap.put(Thermostat.PROP_REPEAT_MINUTE, REPEAT_DEFAULT_MINUTE);
             mRxPropertyMap.commit();
         }
     }
@@ -95,13 +134,17 @@ public class KSThermostat extends KSDeviceContextBase {
             // Request commands
             case CMD_HEATING_STATE_REQ: return parseHeatingStateReq(packet, outProps);
             case CMD_TEMPERATURE_REQ: return parseTemperatureReq(packet, outProps);
+            case CMD_RESERVED_MODE_LEGACY_REQ:
             case CMD_RESERVED_MODE_REQ: return parseReservedModeReq(packet, outProps);
+            case CMD_REPEAT_MODE_REQ: return parseRepeatModeReq(packet, outProps);
+            case CMD_RESERVED_MODE_RSP: return parseReservedModeRsp(packet, outProps);
+            case CMD_REPEAT_MODE_RSP: return parseRepeatModeRsp(packet, outProps);
             case CMD_OUTING_SETTING_REQ: return parseOutingSettingReq(packet, outProps);
             case CMD_HOTWATER_ONLY_REQ: return parseHotwaterOnlyReq(packet, outProps);
             // Response commands
             case CMD_HEATING_STATE_RSP:
             case CMD_TEMPERATURE_RSP:
-            case CMD_RESERVED_MODE_RSP:
+            case CMD_RESERVED_MODE_LEGACY_RSP:
             case CMD_OUTING_SETTING_RSP:
             case CMD_HOTWATER_ONLY_RSP: {
                 // All the responses about control requests is same with the response of status.
@@ -143,6 +186,7 @@ public class KSThermostat extends KSDeviceContextBase {
         int outingSetting = 0;
         int reservedMode  = 0;
         int hotwaterOnly  = 0;
+        int repeatMode    = 0;
         int devIndex = 0;
 
         for (KSThermostat child: getChildren(KSThermostat.class)) {
@@ -152,6 +196,7 @@ public class KSThermostat extends KSDeviceContextBase {
             if ((curStates & Thermostat.Function.OUTING_SETTING) != 0) outingSetting |= (1 << devIndex);
             if ((curStates & Thermostat.Function.HOTWATER_ONLY) != 0) hotwaterOnly |= (1 << devIndex);
             if ((curStates & Thermostat.Function.RESERVED_MODE) != 0) reservedMode |= (1 << devIndex);
+            if ((curStates & Thermostat.Function.REPEAT_MODE) != 0) repeatMode |= (1 << devIndex);
             devIndex++;
         }
 
@@ -159,6 +204,7 @@ public class KSThermostat extends KSDeviceContextBase {
         outData.append(outingSetting);
         outData.append(reservedMode);
         outData.append(hotwaterOnly);
+        outData.append(repeatMode);
 
         for (KSThermostat child: getChildren(KSThermostat.class)) {
             final PropertyMap childProps = child.getReadPropertyMap();
@@ -174,7 +220,7 @@ public class KSThermostat extends KSDeviceContextBase {
 
     @Override
     protected @ParseResult int parseStatusRsp(KSPacket packet, PropertyMap outProps) {
-        if (packet.data.length < 5) {
+        if (packet.data.length < 6) {
             if (DBG) Log.w(TAG, "parse-status-rsp: wrong size of data " + packet.data.length);
             return PARSE_ERROR_MALFORMED_PACKET;
         }
@@ -186,7 +232,7 @@ public class KSThermostat extends KSDeviceContextBase {
             return PARSE_OK_ERROR_RECEIVED;
         }
 
-        int controllerCount = (int)((packet.data.length - 5) / 2);
+        int controllerCount = (int)((packet.data.length - 6) / 2);
         if (controllerCount <= 0) {
             if (DBG) Log.w(TAG, "parse-status-rsp: wrong or none of controllers:" + controllerCount);
             controllerCount = 0;
@@ -220,6 +266,7 @@ public class KSThermostat extends KSDeviceContextBase {
         final boolean outingSetting = ((packet.data[2] & (1 << devIndex)) != 0);
         final boolean reservedMode = ((packet.data[3] & (1 << devIndex)) != 0);
         final boolean hotwaterOnly = ((packet.data[4] & (1 << devIndex)) != 0);
+        final boolean repeatMode = ((packet.data[5] & (1 << devIndex)) != 0);
 
         long curStates = (long) outProps.get(Thermostat.PROP_FUNCTION_STATES).getValue();
         long newStates = 0;
@@ -228,6 +275,7 @@ public class KSThermostat extends KSDeviceContextBase {
         if (outingSetting) newStates |= Thermostat.Function.OUTING_SETTING;
         if (reservedMode) newStates |= Thermostat.Function.RESERVED_MODE;
         if (hotwaterOnly) newStates |= Thermostat.Function.HOTWATER_ONLY;
+        if (repeatMode) newStates |= Thermostat.Function.REPEAT_MODE;
 
         if (newStates != curStates) {
             outProps.put(Thermostat.PROP_FUNCTION_STATES, newStates);
@@ -236,7 +284,7 @@ public class KSThermostat extends KSDeviceContextBase {
 
         final float settingTemp = outProps.get(Thermostat.PROP_SETTING_TEMPERATURE, Float.class);
         final float currentTemp = outProps.get(Thermostat.PROP_CURRENT_TEMPERATURE, Float.class);
-        int temperatureDataOffset = 5 + (devIndex * 2);
+        int temperatureDataOffset = 6 + (devIndex * 2);
         float newSettingTemp = KSUtils.parseTemperatureByte(packet.data[temperatureDataOffset]);
         float newCurrentTemp = KSUtils.parseTemperatureByte(packet.data[temperatureDataOffset + 1]);
 
@@ -275,6 +323,7 @@ public class KSThermostat extends KSDeviceContextBase {
         if ((supportedFunctions & Thermostat.Function.OUTING_SETTING) != 0L) data5 |= (1 << 1);
         if ((supportedFunctions & Thermostat.Function.HOTWATER_ONLY) != 0L)  data5 |= (1 << 2);
         if ((supportedFunctions & Thermostat.Function.RESERVED_MODE) != 0L)  data5 |= (1 << 3);
+        if ((supportedFunctions & Thermostat.Function.REPEAT_MODE) != 0L)    data5 |= (1 << 5);
         final float tempRes = props.get(Thermostat.PROP_TEMP_RESOLUTION, Float.class);
         if (KSUtils.floatEquals(tempRes, 0.5f))                              data5 |= (1 << 4);
         data.append(data5);
@@ -320,6 +369,7 @@ public class KSThermostat extends KSDeviceContextBase {
         if ((data5 & (1 << 1)) != 0) supportedFunctions |= (Thermostat.Function.OUTING_SETTING);
         if ((data5 & (1 << 2)) != 0) supportedFunctions |= (Thermostat.Function.HOTWATER_ONLY);
         if ((data5 & (1 << 3)) != 0) supportedFunctions |= (Thermostat.Function.RESERVED_MODE);
+        if ((data5 & (1 << 5)) != 0) supportedFunctions |= (Thermostat.Function.REPEAT_MODE);
         if ((data5 & (1 << 4)) != 0) mSupportHalfDegree = true;
 
         outProps.put(Thermostat.PROP_SUPPORTED_FUNCTIONS, supportedFunctions);
@@ -360,16 +410,58 @@ public class KSThermostat extends KSDeviceContextBase {
     }
 
     protected @ParseResult int parseReservedModeReq(KSPacket packet, PropertyMap outProps) {
-        // Parse request packet
-        final boolean reservedMode = ((packet.data[0] & 0xFF) == 0x01);
+        if (packet.commandType == CMD_RESERVED_MODE_LEGACY_REQ) {
+            if (packet.data.length < 1) return PARSE_ERROR_MALFORMED_PACKET;
+            final boolean reservedMode = ((packet.data[0] & 0xFF) == TIMER_MODE_ON);
+            outProps.putBit(Thermostat.PROP_FUNCTION_STATES, Thermostat.Function.RESERVED_MODE, reservedMode);
+            final ByteArrayBuffer statusData = new ByteArrayBuffer();
+            makeStatusRspData(outProps, statusData);
+            sendPacket(createPacket(CMD_RESERVED_MODE_LEGACY_RSP, statusData.toArray()));
+            return PARSE_OK_STATE_UPDATED;
+        }
+
+        // KASH B1101-8 v2: 0x48 is an individual timer command.
+        // LENGTH 0x00: query current reserved-mode state/time, no state change.
+        // LENGTH 0x02: set DATA0(mode), DATA1(hour). Minute field was removed.
+        if (packet.data.length == 0) {
+            long states = outProps.get(Thermostat.PROP_FUNCTION_STATES, Long.class);
+            sendPacket(createPacket(CMD_RESERVED_MODE_RSP, makeReservedModeData(outProps, states)));
+            return PARSE_OK_ACTION_PERFORMED;
+        }
+        if (packet.data.length != 2) return PARSE_ERROR_MALFORMED_PACKET;
+
+        final boolean reservedMode = ((packet.data[0] & 0xFF) == TIMER_MODE_ON);
         outProps.putBit(Thermostat.PROP_FUNCTION_STATES, Thermostat.Function.RESERVED_MODE, reservedMode);
+        if (reservedMode) {
+            outProps.put(Thermostat.PROP_RESERVED_HOUR, clamp("reservedHour", packet.data[1] & 0xFF, TIMER_HOUR_MIN, TIMER_HOUR_MAX));
+        } else {
+            outProps.put(Thermostat.PROP_RESERVED_HOUR, TIMER_HOUR_DISABLED);
+        }
+        outProps.put(Thermostat.PROP_RESERVED_MINUTE, TIMER_MINUTE_DISABLED);
 
-        final ByteArrayBuffer data = new ByteArrayBuffer();
-        makeStatusRspData(outProps, data); // Encode response packet same with status.
+        sendPacket(createPacket(CMD_RESERVED_MODE_RSP, makeReservedModeData(outProps, outProps.get(Thermostat.PROP_FUNCTION_STATES, Long.class))));
+        return PARSE_OK_STATE_UPDATED;
+    }
 
-        // Send response packet
-        sendPacket(createPacket(CMD_RESERVED_MODE_RSP, data.toArray()));
+    protected @ParseResult int parseRepeatModeReq(KSPacket packet, PropertyMap outProps) {
+        // KASH B1101-8 v2: 0x49 LENGTH 0x00 is query, LENGTH 0x03 is set.
+        if (packet.data.length == 0) {
+            long states = outProps.get(Thermostat.PROP_FUNCTION_STATES, Long.class);
+            sendPacket(createPacket(CMD_REPEAT_MODE_RSP, makeRepeatModeData(outProps, states)));
+            return PARSE_OK_ACTION_PERFORMED;
+        }
+        if (packet.data.length != 3) return PARSE_ERROR_MALFORMED_PACKET;
 
+        final boolean repeatMode = ((packet.data[0] & 0xFF) == TIMER_MODE_ON);
+        outProps.putBit(Thermostat.PROP_FUNCTION_STATES, Thermostat.Function.REPEAT_MODE, repeatMode);
+        if (repeatMode) {
+            outProps.put(Thermostat.PROP_REPEAT_HOUR, clamp("repeatHour", packet.data[1] & 0xFF, REPEAT_HOUR_MIN, TIMER_HOUR_MAX));
+            outProps.put(Thermostat.PROP_REPEAT_MINUTE, clamp("repeatMinute", packet.data[2] & 0xFF, TIMER_MINUTE_MIN, TIMER_MINUTE_MAX));
+        } else {
+            outProps.put(Thermostat.PROP_REPEAT_HOUR, TIMER_HOUR_DISABLED);
+            outProps.put(Thermostat.PROP_REPEAT_MINUTE, TIMER_MINUTE_DISABLED);
+        }
+        sendPacket(createPacket(CMD_REPEAT_MODE_RSP, makeRepeatModeData(outProps, outProps.get(Thermostat.PROP_FUNCTION_STATES, Long.class))));
         return PARSE_OK_STATE_UPDATED;
     }
 
@@ -399,6 +491,34 @@ public class KSThermostat extends KSDeviceContextBase {
         sendPacket(createPacket(CMD_HOTWATER_ONLY_RSP, data.toArray()));
 
         return PARSE_OK_STATE_UPDATED;
+    }
+
+
+    protected @ParseResult int parseReservedModeRsp(KSPacket packet, PropertyMap outProps) {
+        if (packet.data.length != 2) return PARSE_ERROR_MALFORMED_PACKET;
+        final boolean reservedMode = ((packet.data[0] & 0xFF) == TIMER_MODE_ON);
+        outProps.putBit(Thermostat.PROP_FUNCTION_STATES, Thermostat.Function.RESERVED_MODE, reservedMode);
+        if (reservedMode) {
+            outProps.put(Thermostat.PROP_RESERVED_HOUR, clamp("reservedHour", packet.data[1] & 0xFF, TIMER_HOUR_MIN, TIMER_HOUR_MAX));
+        } else {
+            outProps.put(Thermostat.PROP_RESERVED_HOUR, TIMER_HOUR_DISABLED);
+        }
+        outProps.put(Thermostat.PROP_RESERVED_MINUTE, TIMER_MINUTE_DISABLED);
+        return PARSE_OK_ACTION_PERFORMED;
+    }
+
+    protected @ParseResult int parseRepeatModeRsp(KSPacket packet, PropertyMap outProps) {
+        if (packet.data.length != 3) return PARSE_ERROR_MALFORMED_PACKET;
+        final boolean repeatMode = ((packet.data[0] & 0xFF) == TIMER_MODE_ON);
+        outProps.putBit(Thermostat.PROP_FUNCTION_STATES, Thermostat.Function.REPEAT_MODE, repeatMode);
+        if (repeatMode) {
+            outProps.put(Thermostat.PROP_REPEAT_HOUR, clamp("repeatHour", packet.data[1] & 0xFF, REPEAT_HOUR_MIN, TIMER_HOUR_MAX));
+            outProps.put(Thermostat.PROP_REPEAT_MINUTE, clamp("repeatMinute", packet.data[2] & 0xFF, TIMER_MINUTE_MIN, TIMER_MINUTE_MAX));
+        } else {
+            outProps.put(Thermostat.PROP_REPEAT_HOUR, TIMER_HOUR_DISABLED);
+            outProps.put(Thermostat.PROP_REPEAT_MINUTE, TIMER_MINUTE_DISABLED);
+        }
+        return PARSE_OK_ACTION_PERFORMED;
     }
 
     protected @ParseResult int parseSingleControlRsp(KSPacket packet, PropertyMap outProps) {
@@ -442,8 +562,12 @@ public class KSThermostat extends KSDeviceContextBase {
         }
 
         if ((difStates & Thermostat.Function.RESERVED_MODE) != 0) {
-            byte state = (byte) ((reqStates & Thermostat.Function.RESERVED_MODE) != 0 ? 1 : 0);
-            sendControlPacket3x(CMD_RESERVED_MODE_REQ, state);
+            sendReservedModeControl(reqProps, reqStates);
+            consumed |= true;
+        }
+
+        if ((difStates & Thermostat.Function.REPEAT_MODE) != 0) {
+            sendRepeatModeControl(reqProps, reqStates);
             consumed |= true;
         }
 
@@ -455,6 +579,131 @@ public class KSThermostat extends KSDeviceContextBase {
         byte tempByte = KSUtils.makeTemperatureByte(reqTemp, mMinTemperature, mMaxTemperature, mSupportHalfDegree);
         sendControlPacket3x(CMD_TEMPERATURE_REQ, tempByte);
         return true;
+    }
+
+    protected boolean onSlaveFunctionControlTask(PropertyMap reqProps, PropertyMap outProps) {
+        long curStates = (Long) getProperty(Thermostat.PROP_FUNCTION_STATES).getValue();
+        long reqStates = (Long) reqProps.get(Thermostat.PROP_FUNCTION_STATES).getValue();
+        long difStates = curStates ^ reqStates;
+
+        outProps.put(Thermostat.PROP_FUNCTION_STATES, reqStates);
+
+        boolean consumed = false;
+        if ((difStates & Thermostat.Function.RESERVED_MODE) != 0) {
+            sendReservedModeResponse(reqProps, reqStates);
+            consumed = true;
+        }
+        if ((difStates & Thermostat.Function.REPEAT_MODE) != 0) {
+            sendRepeatModeResponse(reqProps, reqStates);
+            consumed = true;
+        }
+        return consumed;
+    }
+
+    protected boolean onSlaveReservedTimerControlTask(PropertyMap reqProps, PropertyMap outProps) {
+        reflectIntegerPropertyIfRequested(reqProps, outProps, Thermostat.PROP_RESERVED_HOUR);
+        if (reqProps.get(Thermostat.PROP_FUNCTION_STATES) != null) {
+            // Function-state task will send one C8 with the same batched hour/minute values.
+            return true;
+        }
+        long reqStates = (Long) getProperty(Thermostat.PROP_FUNCTION_STATES).getValue();
+        if ((reqStates & Thermostat.Function.RESERVED_MODE) == 0L) return true;
+        sendReservedModeResponse(reqProps, reqStates);
+        return true;
+    }
+
+    protected boolean onSlaveRepeatTimerControlTask(PropertyMap reqProps, PropertyMap outProps) {
+        reflectIntegerPropertyIfRequested(reqProps, outProps, Thermostat.PROP_REPEAT_HOUR);
+        reflectIntegerPropertyIfRequested(reqProps, outProps, Thermostat.PROP_REPEAT_MINUTE);
+
+        if (reqProps.get(Thermostat.PROP_FUNCTION_STATES) != null) {
+            // Function-state task will send one C9 with the same batched hour/minute values.
+            return true;
+        }
+        long reqStates = (Long) getProperty(Thermostat.PROP_FUNCTION_STATES).getValue();
+        if ((reqStates & Thermostat.Function.REPEAT_MODE) == 0L) return true;
+        sendRepeatModeResponse(reqProps, reqStates);
+        return true;
+    }
+
+    private void reflectIntegerPropertyIfRequested(PropertyMap reqProps, PropertyMap outProps, String propName) {
+        if (reqProps.get(propName) != null) {
+            outProps.put(propName, (Integer)reqProps.get(propName).getValue());
+        }
+    }
+
+
+    protected boolean onReservedTimerControlTask(PropertyMap reqProps, PropertyMap outProps) {
+        long reqStates = (Long) getProperty(Thermostat.PROP_FUNCTION_STATES).getValue();
+        if ((reqStates & Thermostat.Function.RESERVED_MODE) == 0L) return false;
+        sendReservedModeControl(reqProps, reqStates);
+        return true;
+    }
+
+    protected boolean onRepeatTimerControlTask(PropertyMap reqProps, PropertyMap outProps) {
+        long reqStates = (Long) getProperty(Thermostat.PROP_FUNCTION_STATES).getValue();
+        if ((reqStates & Thermostat.Function.REPEAT_MODE) == 0L) return false;
+        sendRepeatModeControl(reqProps, reqStates);
+        return true;
+    }
+
+    private void sendReservedModeControl(PropertyMap props, long reqStates) {
+        KSPacket packet = createPacket(CMD_RESERVED_MODE_REQ, makeReservedModeData(props, reqStates));
+        sendPacket(packet, timerControlRepeatCount());
+    }
+
+    private void sendRepeatModeControl(PropertyMap props, long reqStates) {
+        KSPacket packet = createPacket(CMD_REPEAT_MODE_REQ, makeRepeatModeData(props, reqStates));
+        sendPacket(packet, timerControlRepeatCount());
+    }
+
+    private void sendReservedModeResponse(PropertyMap props, long reqStates) {
+        KSPacket packet = createPacket(CMD_RESERVED_MODE_RSP, makeReservedModeData(props, reqStates));
+        sendPacket(packet);
+    }
+
+    private void sendRepeatModeResponse(PropertyMap props, long reqStates) {
+        KSPacket packet = createPacket(CMD_REPEAT_MODE_RSP, makeRepeatModeData(props, reqStates));
+        sendPacket(packet);
+    }
+
+    private long timerControlRepeatCount() {
+        // 0x*F/0xFF global timer controls require 3 total frames, while 0x*1~0x*E
+        // individual controls require a single request and response.
+        return getDeviceSubId().hasFull() ? CONTROL_REPEAT_TOTAL_3 : CONTROL_REPEAT_NONE;
+    }
+
+    private byte[] makeReservedModeData(PropertyMap props, long states) {
+        final int enabled = ((states & Thermostat.Function.RESERVED_MODE) != 0L) ? TIMER_MODE_ON : TIMER_MODE_OFF;
+        if (enabled == TIMER_MODE_OFF) {
+            return new byte[] { TIMER_MODE_OFF, TIMER_HOUR_DISABLED };
+        }
+        int hour = getTimerInt(props, Thermostat.PROP_RESERVED_HOUR, RESERVED_DEFAULT_HOUR);
+        hour = clamp("reservedHour", hour, TIMER_HOUR_MIN, TIMER_HOUR_MAX);
+        return new byte[] { TIMER_MODE_ON, (byte)hour };
+    }
+
+    private byte[] makeRepeatModeData(PropertyMap props, long states) {
+        final int enabled = ((states & Thermostat.Function.REPEAT_MODE) != 0L) ? TIMER_MODE_ON : TIMER_MODE_OFF;
+        if (enabled == TIMER_MODE_OFF) {
+            return new byte[] { TIMER_MODE_OFF, TIMER_HOUR_DISABLED, TIMER_MINUTE_DISABLED };
+        }
+        int hour = getTimerInt(props, Thermostat.PROP_REPEAT_HOUR, REPEAT_DEFAULT_HOUR);
+        int minute = getTimerInt(props, Thermostat.PROP_REPEAT_MINUTE, REPEAT_DEFAULT_MINUTE);
+        hour = clamp("repeatHour", hour, REPEAT_HOUR_MIN, TIMER_HOUR_MAX);
+        minute = clamp("repeatMinute", minute, TIMER_MINUTE_MIN, TIMER_MINUTE_MAX);
+        return new byte[] { TIMER_MODE_ON, (byte)hour, (byte)minute };
+    }
+
+    private int getTimerInt(PropertyMap reqProps, String propName, int defaultValue) {
+        if (reqProps.get(propName) != null) {
+            return (Integer)reqProps.get(propName).getValue();
+        }
+        if (getProperty(propName) != null) {
+            Object value = getProperty(propName).getValue();
+            if (value instanceof Integer) return (Integer)value;
+        }
+        return defaultValue;
     }
 
     protected void sendControlPacket3x(int cmd, byte data) {

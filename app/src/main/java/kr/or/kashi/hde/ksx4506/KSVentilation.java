@@ -44,6 +44,21 @@ public class KSVentilation extends KSDeviceContextBase {
     public static final int CMD_FAN_SPEED_CONTROL_RSP = 0xC2;
     public static final int CMD_MODE_CONTROL_REQ = 0x43;
     public static final int CMD_MODE_CONTROL_RSP = 0xC3;
+    public static final int CMD_OFF_TIMER_CONTROL_REQ = 0x44;
+    public static final int CMD_OFF_TIMER_CONTROL_RSP = 0xC4;
+    public static final int CMD_HOOD_LINK_CONTROL_REQ = 0x45;
+    public static final int CMD_HOOD_LINK_CONTROL_RSP = 0xC5;
+    public static final int CMD_BASE_VENT_CONTROL_REQ = 0x46;
+    public static final int CMD_BASE_VENT_CONTROL_RSP = 0xC6;
+
+    private static final int VENT_TIMER_DISABLED_VALUE = 0x00;
+    private static final int VENT_TIMER_ENABLE_VALUE = 0x01;
+    private static final int VENT_TIMER_HOUR_DISABLED = 0;
+    private static final int VENT_TIMER_HOUR_MIN = 1;
+    private static final int VENT_TIMER_HOUR_MAX = 24;
+    private static final int VENT_TIMER_MINUTE_DISABLED = 0;
+    private static final int VENT_TIMER_MINUTE_MIN = 0;
+    private static final int VENT_TIMER_MINUTE_MAX = 60;
 
     private int mMinFanSpeedLevel = 0;
     private int mMaxFanSpeedLevel = 5;
@@ -57,6 +72,12 @@ public class KSVentilation extends KSDeviceContextBase {
             setPropertyTask(Ventilation.PROP_CUR_FAN_SPEED, this::onFanSpeedControlTask);
             setPropertyTask(Ventilation.PROP_OPERATION_MODE, this::onModeControlTask);
             setPropertyTask(Ventilation.PROP_OPERATION_ALARM, this::onAlarmControlTask);
+            setPropertyTask(Ventilation.PROP_HOOD_LINK_STATE, this::onHoodLinkControlTask);
+            setPropertyTask(Ventilation.PROP_BASE_VENT_STATE, this::onBaseVentControlTask);
+            // KASH B1101-3 off timer command must be emitted once by the enable field.
+            // Hour/minute are parameters only; registering them as TX tasks causes
+            // intermediate packets such as 01 01 00 while the UI is still updating.
+            setPropertyTask(Ventilation.PROP_OFF_TIMER_ENABLED, this::onOffTimerControlTask);
         } else {
             // TEMP: Initialize some properties as specific values in slave mode.
             long supportedModes = 0;
@@ -73,11 +94,25 @@ public class KSVentilation extends KSDeviceContextBase {
             supportedSensors |= Ventilation.Sensor.CO2;
             mRxPropertyMap.put(Ventilation.PROP_SUPPORTED_SENSORS, supportedSensors);
 
+            long supportedFeatures = 0;
+            supportedFeatures |= Ventilation.Feature.HOOD_LINK;
+            supportedFeatures |= Ventilation.Feature.BASE_VENT;
+            mRxPropertyMap.put(Ventilation.PROP_SUPPORTED_FEATURES, supportedFeatures);
+
             mRxPropertyMap.put(Ventilation.PROP_OPERATION_MODE, Ventilation.Mode.NORMAL);
             mRxPropertyMap.put(Ventilation.PROP_OPERATION_ALARM, 0);
             mRxPropertyMap.put(Ventilation.PROP_CUR_FAN_SPEED, mMinFanSpeedLevel);
             mRxPropertyMap.put(Ventilation.PROP_MIN_FAN_SPEED, mMinFanSpeedLevel);
             mRxPropertyMap.put(Ventilation.PROP_MAX_FAN_SPEED, mMaxFanSpeedLevel);
+            mRxPropertyMap.put(Ventilation.PROP_OFF_TIMER_ENABLED, false);
+            mRxPropertyMap.put(Ventilation.PROP_OFF_TIMER_HOUR, VENT_TIMER_HOUR_DISABLED);
+            mRxPropertyMap.put(Ventilation.PROP_OFF_TIMER_MINUTE, VENT_TIMER_MINUTE_DISABLED);
+
+            setPropertyTask(Ventilation.PROP_HOOD_LINK_STATE, this::onSlaveHoodLinkControlTask);
+            setPropertyTask(Ventilation.PROP_BASE_VENT_STATE, this::onSlaveBaseVentControlTask);
+            setPropertyTask(Ventilation.PROP_OFF_TIMER_ENABLED, this::onSlaveOffTimerControlTask);
+            setPropertyTask(Ventilation.PROP_OFF_TIMER_HOUR, this::onSlaveOffTimerControlTask);
+            setPropertyTask(Ventilation.PROP_OFF_TIMER_MINUTE, this::onSlaveOffTimerControlTask);
 
             mRxPropertyMap.commit();
         }
@@ -95,10 +130,16 @@ public class KSVentilation extends KSDeviceContextBase {
             case CMD_POWER_CONTROL_REQ: return parsePowerControlReq(packet, outProps);
             case CMD_FAN_SPEED_CONTROL_REQ: return parseFanSpeedControlReq(packet, outProps);
             case CMD_MODE_CONTROL_REQ: return parseModeControlReq(packet, outProps);
+            case CMD_OFF_TIMER_CONTROL_REQ: return parseOffTimerControlReq(packet, outProps);
+            case CMD_HOOD_LINK_CONTROL_REQ: return parseHoodLinkControlReq(packet, outProps);
+            case CMD_BASE_VENT_CONTROL_REQ: return parseBaseVentControlReq(packet, outProps);
 
+            case CMD_OFF_TIMER_CONTROL_RSP: return parseOffTimerControlRsp(packet, outProps);
             case CMD_POWER_CONTROL_RSP:
             case CMD_FAN_SPEED_CONTROL_RSP:
-            case CMD_MODE_CONTROL_RSP: {
+            case CMD_MODE_CONTROL_RSP:
+            case CMD_HOOD_LINK_CONTROL_RSP:
+            case CMD_BASE_VENT_CONTROL_RSP: {
                 return parseSingleControlRsp(packet, outProps);
             }
         }
@@ -118,6 +159,7 @@ public class KSVentilation extends KSDeviceContextBase {
         makeFanSpeedByte(props, data);
         makeModeStateByte(props, data);
         makeAlarmStateByte(props, data);
+        makeOffTimerData(props, data);
 
         // Send response packet
         sendPacket(createPacket(CMD_STATUS_RSP, data.toArray()));
@@ -127,7 +169,7 @@ public class KSVentilation extends KSDeviceContextBase {
 
     @Override
     protected @ParseResult int parseStatusRsp(KSPacket packet, PropertyMap outProps) {
-        if (packet.data.length < 5) { // At least, 5 (error, running, speed, mode, alarm)
+        if (packet.data.length < 5) { // legacy minimum: error, running, speed, mode, alarm
             if (DBG) Log.w(TAG, "parse-status-rsp: wrong size of data " + packet.data.length);
             return PARSE_ERROR_MALFORMED_PACKET;
         }
@@ -142,6 +184,9 @@ public class KSVentilation extends KSDeviceContextBase {
         parseFanSpeedByte(packet.data[2], outProps);
         parseModeStateByte(packet.data[3], outProps);
         parseAlarmStateByte(packet.data[4], outProps);
+        if (packet.data.length >= 8) {
+            parseOffTimerData(new byte[] { packet.data[5], packet.data[6], packet.data[7] }, outProps);
+        }
 
         return PARSE_OK_STATE_UPDATED;
     }
@@ -166,6 +211,9 @@ public class KSVentilation extends KSDeviceContextBase {
         if ((supportedModes & Ventilation.Mode.SAVING) != 0) supportByte |= (1 << 4);
         final long supportedSensors = props.get(Ventilation.PROP_SUPPORTED_SENSORS, Long.class);
         if ((supportedSensors & Ventilation.Sensor.CO2) != 0) supportByte |= (1 << 5);
+        final long supportedFeatures = props.get(Ventilation.PROP_SUPPORTED_FEATURES, Long.class);
+        if ((supportedFeatures & Ventilation.Feature.BASE_VENT) != 0) supportByte |= (1 << 6);
+        if ((supportedFeatures & Ventilation.Feature.HOOD_LINK) != 0) supportByte |= (1 << 7);
         data.append(supportByte);
 
         // Send response packet
@@ -201,6 +249,11 @@ public class KSVentilation extends KSDeviceContextBase {
         if ((data1 & (1 << 5)) != 0) supportedSensors |= Ventilation.Sensor.CO2;
         outProps.put(Ventilation.PROP_SUPPORTED_SENSORS, supportedSensors);
 
+        long supportedFeatures = 0;
+        if ((data1 & (1 << 6)) != 0) supportedFeatures |= Ventilation.Feature.BASE_VENT;
+        if ((data1 & (1 << 7)) != 0) supportedFeatures |= Ventilation.Feature.HOOD_LINK;
+        outProps.put(Ventilation.PROP_SUPPORTED_FEATURES, supportedFeatures);
+
         return PARSE_OK_PEER_DETECTED;
     }
 
@@ -223,7 +276,7 @@ public class KSVentilation extends KSDeviceContextBase {
         // Send response packet
         final ByteArrayBuffer data = new ByteArrayBuffer();
         makeSingleControlRsp(outProps, data); // Encode common response packet for all control request.
-        sendPacket(createPacket(CMD_POWER_CONTROL_RSP, data.toArray()));
+        sendPacket(createPacket(CMD_FAN_SPEED_CONTROL_RSP, data.toArray()));
 
         return PARSE_OK_STATE_UPDATED;
     }
@@ -235,9 +288,42 @@ public class KSVentilation extends KSDeviceContextBase {
         // Send response packet
         final ByteArrayBuffer data = new ByteArrayBuffer();
         makeSingleControlRsp(outProps, data); // Encode common response packet for all control request.
-        sendPacket(createPacket(CMD_POWER_CONTROL_RSP, data.toArray()));
+        sendPacket(createPacket(CMD_MODE_CONTROL_RSP, data.toArray()));
 
         return PARSE_OK_STATE_UPDATED;
+    }
+
+
+
+    protected @ParseResult int parseOffTimerControlReq(KSPacket packet, PropertyMap outProps) {
+        if (packet.data.length != 3) return PARSE_ERROR_MALFORMED_PACKET;
+        parseOffTimerData(packet.data, outProps);
+        final ByteArrayBuffer data = new ByteArrayBuffer();
+        makeOffTimerData(outProps, data);
+        sendPacket(createPacket(CMD_OFF_TIMER_CONTROL_RSP, data.toArray()));
+        return PARSE_OK_STATE_UPDATED;
+    }
+
+    protected @ParseResult int parseHoodLinkControlReq(KSPacket packet, PropertyMap outProps) {
+        parseHoodLinkStateByte(packet.data[0], outProps);
+        final ByteArrayBuffer data = new ByteArrayBuffer();
+        makeSingleControlRsp(outProps, data);
+        sendPacket(createPacket(CMD_HOOD_LINK_CONTROL_RSP, data.toArray()));
+        return PARSE_OK_STATE_UPDATED;
+    }
+
+    protected @ParseResult int parseBaseVentControlReq(KSPacket packet, PropertyMap outProps) {
+        parseBaseVentStateByte(packet.data[0], outProps);
+        final ByteArrayBuffer data = new ByteArrayBuffer();
+        makeSingleControlRsp(outProps, data);
+        sendPacket(createPacket(CMD_BASE_VENT_CONTROL_RSP, data.toArray()));
+        return PARSE_OK_STATE_UPDATED;
+    }
+
+    protected @ParseResult int parseOffTimerControlRsp(KSPacket packet, PropertyMap outProps) {
+        if (packet.data.length != 3) return PARSE_ERROR_MALFORMED_PACKET;
+        parseOffTimerData(packet.data, outProps);
+        return PARSE_OK_ACTION_PERFORMED;
     }
 
     protected void makeSingleControlRsp(PropertyMap props, ByteArrayBuffer outData) {
@@ -250,7 +336,7 @@ public class KSVentilation extends KSDeviceContextBase {
 
     @Override
     protected @ParseResult int parseSingleControlRsp(KSPacket packet, PropertyMap outProps) {
-        if (packet.data.length < 2) {
+        if (packet.data.length < 5) {
             if (DBG) Log.w(TAG, "parse-status-ctrl-rsp: wrong size of data " + packet.data.length);
             return PARSE_ERROR_MALFORMED_PACKET;
         }
@@ -319,6 +405,8 @@ public class KSVentilation extends KSDeviceContextBase {
         if ((opAlarms & Ventilation.Alarm.SMOKE_REMOVING) != 0) alarmByte |= (1 << 3);
         if ((opAlarms & Ventilation.Alarm.HIGH_CO2_LEVEL) != 0) alarmByte |= (1 << 4);
         if ((opAlarms & Ventilation.Alarm.HEATER_RUNNING) != 0) alarmByte |= (1 << 5);
+        if (props.get(Ventilation.PROP_BASE_VENT_STATE, Boolean.class)) alarmByte |= (1 << 6);
+        if (props.get(Ventilation.PROP_HOOD_LINK_STATE, Boolean.class)) alarmByte |= (1 << 7);
         outData.append(alarmByte);
     }
 
@@ -331,6 +419,8 @@ public class KSVentilation extends KSDeviceContextBase {
         if ((alarmByte & (1 << 4)) != 0) newAlarms |= Ventilation.Alarm.HIGH_CO2_LEVEL;
         if ((alarmByte & (1 << 5)) != 0) newAlarms |= Ventilation.Alarm.HEATER_RUNNING;
         outProps.put(Ventilation.PROP_OPERATION_ALARM, newAlarms);
+        outProps.put(Ventilation.PROP_BASE_VENT_STATE, (alarmByte & (1 << 6)) != 0);
+        outProps.put(Ventilation.PROP_HOOD_LINK_STATE, (alarmByte & (1 << 7)) != 0);
     }
 
     protected boolean onPowerControlTask(PropertyMap reqProps, PropertyMap outProps) {
@@ -354,6 +444,95 @@ public class KSVentilation extends KSDeviceContextBase {
 
     protected boolean onAlarmControlTask(PropertyMap reqProps, PropertyMap outProps) {
         // Normally alarms are read-only.
+        return true;
+    }
+
+
+
+    protected void makeOffTimerData(PropertyMap props, ByteArrayBuffer outData) {
+        final boolean enabled = props.get(Ventilation.PROP_OFF_TIMER_ENABLED, Boolean.class);
+        outData.append(enabled ? VENT_TIMER_ENABLE_VALUE : VENT_TIMER_DISABLED_VALUE);
+        if (!enabled) {
+            // KASH B1101-3: when timer is cleared, DATA1/DATA2 must be 0.
+            outData.append(VENT_TIMER_HOUR_DISABLED);
+            outData.append(VENT_TIMER_MINUTE_DISABLED);
+            return;
+        }
+        outData.append(clamp("offTimerHour", props.get(Ventilation.PROP_OFF_TIMER_HOUR, Integer.class), VENT_TIMER_HOUR_MIN, VENT_TIMER_HOUR_MAX));
+        outData.append(clamp("offTimerMinute", props.get(Ventilation.PROP_OFF_TIMER_MINUTE, Integer.class), VENT_TIMER_MINUTE_MIN, VENT_TIMER_MINUTE_MAX));
+    }
+
+    protected void parseOffTimerData(byte[] data, PropertyMap outProps) {
+        boolean enabled = (data[0] & 0xFF) == VENT_TIMER_ENABLE_VALUE;
+        outProps.put(Ventilation.PROP_OFF_TIMER_ENABLED, enabled);
+        if (!enabled) {
+            outProps.put(Ventilation.PROP_OFF_TIMER_HOUR, VENT_TIMER_HOUR_DISABLED);
+            outProps.put(Ventilation.PROP_OFF_TIMER_MINUTE, VENT_TIMER_MINUTE_DISABLED);
+        } else {
+            outProps.put(Ventilation.PROP_OFF_TIMER_HOUR, clamp("offTimerHour", data[1] & 0xFF, VENT_TIMER_HOUR_MIN, VENT_TIMER_HOUR_MAX));
+            outProps.put(Ventilation.PROP_OFF_TIMER_MINUTE, clamp("offTimerMinute", data[2] & 0xFF, VENT_TIMER_MINUTE_MIN, VENT_TIMER_MINUTE_MAX));
+        }
+    }
+
+    private void parseHoodLinkStateByte(byte stateByte, PropertyMap outProps) {
+        outProps.put(Ventilation.PROP_HOOD_LINK_STATE, (stateByte & 0xFF) == 0x01);
+    }
+
+    private void parseBaseVentStateByte(byte stateByte, PropertyMap outProps) {
+        outProps.put(Ventilation.PROP_BASE_VENT_STATE, (stateByte & 0xFF) == 0x01);
+    }
+
+    protected boolean onHoodLinkControlTask(PropertyMap reqProps, PropertyMap outProps) {
+        final boolean enabled = reqProps.get(Ventilation.PROP_HOOD_LINK_STATE, Boolean.class);
+        sendPacket(createPacket(CMD_HOOD_LINK_CONTROL_REQ, (byte)(enabled ? 0x01 : 0x00)));
+        return true;
+    }
+
+    protected boolean onBaseVentControlTask(PropertyMap reqProps, PropertyMap outProps) {
+        final boolean enabled = reqProps.get(Ventilation.PROP_BASE_VENT_STATE, Boolean.class);
+        sendPacket(createPacket(CMD_BASE_VENT_CONTROL_REQ, (byte)(enabled ? 0x01 : 0x00)));
+        return true;
+    }
+
+    protected boolean onOffTimerControlTask(PropertyMap reqProps, PropertyMap outProps) {
+        final ByteArrayBuffer data = new ByteArrayBuffer();
+        makeOffTimerData(reqProps, data);
+        sendPacket(createPacket(CMD_OFF_TIMER_CONTROL_REQ, data.toArray()));
+        return true;
+    }
+
+
+    protected boolean onSlaveOffTimerControlTask(PropertyMap reqProps, PropertyMap outProps) {
+        if (reqProps.get(Ventilation.PROP_OFF_TIMER_ENABLED) != null) {
+            outProps.put(Ventilation.PROP_OFF_TIMER_ENABLED, reqProps.get(Ventilation.PROP_OFF_TIMER_ENABLED, Boolean.class));
+        }
+        if (reqProps.get(Ventilation.PROP_OFF_TIMER_HOUR) != null) {
+            outProps.put(Ventilation.PROP_OFF_TIMER_HOUR, reqProps.get(Ventilation.PROP_OFF_TIMER_HOUR, Integer.class));
+        }
+        if (reqProps.get(Ventilation.PROP_OFF_TIMER_MINUTE) != null) {
+            outProps.put(Ventilation.PROP_OFF_TIMER_MINUTE, reqProps.get(Ventilation.PROP_OFF_TIMER_MINUTE, Integer.class));
+        }
+        final ByteArrayBuffer data = new ByteArrayBuffer();
+        makeOffTimerData(outProps, data);
+        sendPacket(createPacket(CMD_OFF_TIMER_CONTROL_RSP, data.toArray()));
+        return true;
+    }
+
+    protected boolean onSlaveHoodLinkControlTask(PropertyMap reqProps, PropertyMap outProps) {
+        final boolean enabled = reqProps.get(Ventilation.PROP_HOOD_LINK_STATE, Boolean.class);
+        outProps.put(Ventilation.PROP_HOOD_LINK_STATE, enabled);
+        final ByteArrayBuffer data = new ByteArrayBuffer();
+        makeSingleControlRsp(outProps, data);
+        sendPacket(createPacket(CMD_HOOD_LINK_CONTROL_RSP, data.toArray()));
+        return true;
+    }
+
+    protected boolean onSlaveBaseVentControlTask(PropertyMap reqProps, PropertyMap outProps) {
+        final boolean enabled = reqProps.get(Ventilation.PROP_BASE_VENT_STATE, Boolean.class);
+        outProps.put(Ventilation.PROP_BASE_VENT_STATE, enabled);
+        final ByteArrayBuffer data = new ByteArrayBuffer();
+        makeSingleControlRsp(outProps, data);
+        sendPacket(createPacket(CMD_BASE_VENT_CONTROL_RSP, data.toArray()));
         return true;
     }
 
