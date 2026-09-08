@@ -402,7 +402,7 @@ public class KSVentilation extends KSDeviceContextBase {
         if ((opAlarms & Ventilation.Alarm.FAN_OVERHEATING) != 0) alarmByte |= (1 << 0);
         if ((opAlarms & Ventilation.Alarm.RECYCLER_CHANGE) != 0) alarmByte |= (1 << 1);
         if ((opAlarms & Ventilation.Alarm.FILTER_CHANGE) != 0) alarmByte |= (1 << 2);
-        if ((opAlarms & Ventilation.Alarm.SMOKE_REMOVING) != 0) alarmByte |= (1 << 3);
+        if ((opAlarms & Ventilation.Alarm.FILTER_CLEANING) != 0) alarmByte |= (1 << 3);
         if ((opAlarms & Ventilation.Alarm.HIGH_CO2_LEVEL) != 0) alarmByte |= (1 << 4);
         if ((opAlarms & Ventilation.Alarm.HEATER_RUNNING) != 0) alarmByte |= (1 << 5);
         if (props.get(Ventilation.PROP_BASE_VENT_STATE, Boolean.class)) alarmByte |= (1 << 6);
@@ -415,7 +415,7 @@ public class KSVentilation extends KSDeviceContextBase {
         if ((alarmByte & (1 << 0)) != 0) newAlarms |= Ventilation.Alarm.FAN_OVERHEATING;
         if ((alarmByte & (1 << 1)) != 0) newAlarms |= Ventilation.Alarm.RECYCLER_CHANGE;
         if ((alarmByte & (1 << 2)) != 0) newAlarms |= Ventilation.Alarm.FILTER_CHANGE;
-        if ((alarmByte & (1 << 3)) != 0) newAlarms |= Ventilation.Alarm.SMOKE_REMOVING;
+        if ((alarmByte & (1 << 3)) != 0) newAlarms |= Ventilation.Alarm.FILTER_CLEANING;
         if ((alarmByte & (1 << 4)) != 0) newAlarms |= Ventilation.Alarm.HIGH_CO2_LEVEL;
         if ((alarmByte & (1 << 5)) != 0) newAlarms |= Ventilation.Alarm.HEATER_RUNNING;
         outProps.put(Ventilation.PROP_OPERATION_ALARM, newAlarms);

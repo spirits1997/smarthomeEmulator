@@ -37,6 +37,7 @@ public class Thermostat extends HomeDevice {
         long HOTWATER_ONLY = 1L << 3;
         long RESERVED_MODE = 1L << 4;
         long REPEAT_MODE = 1L << 5;
+        long LEAK_ALARM = 1L << 6;       // KASH B1101-8:2024, leak detection (characteristic bit6, status error 0xEE)
     }
 
     /**

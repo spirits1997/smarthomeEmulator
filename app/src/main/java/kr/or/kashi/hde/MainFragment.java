@@ -70,6 +70,7 @@ import kr.or.kashi.hde.widget.NullRecyclerViewAdapter;
 public class MainFragment extends Fragment {
     private static final String TAG = "HomeTestFragment";
     private static final String SAVED_DEVICES_FILENAME = "saved_devices";
+    private static final int DEFAULT_POLLING_INTERVAL_MS = 1000;
 
     private final Context mContext;
     private final HomeNetwork mNetwork;
@@ -251,16 +252,23 @@ public class MainFragment extends Fragment {
         ((Button)v.findViewById(R.id.load_button)).setOnClickListener(view -> loadDeviceList());
         ((Button)v.findViewById(R.id.save_button)).setOnClickListener(view -> saveDeviceList());
 
+        // Polling interval candidates in milliseconds. 0 means no polling.
+        // 100ms is the practical minimum because DeviceStatePoller floors the
+        // working-phase interval at PHASE_WORKING_INTERVAL(100ms).
+        final int[] intervalValues = { 0, 100, 200, 300, 500, 1000, 2000, 3000 };
         final List<String> intervalTexts = new ArrayList<>();
-        intervalTexts.add("0");
-        intervalTexts.add("500");
-        intervalTexts.add("1000");
-        intervalTexts.add("2000");
-        intervalTexts.add("3000");
+        for (int value: intervalValues) intervalTexts.add(String.valueOf(value));
+        // The preference stores the interval value itself (not the spinner index)
+        // so that adding new candidates doesn't shift a previously saved selection.
+        final int savedIntervalMs = LocalPreferences.getInt(Pref.POLLING_INTERVAL_MS, DEFAULT_POLLING_INTERVAL_MS);
+        int savedIntervalIndex = intervalTexts.indexOf(String.valueOf(DEFAULT_POLLING_INTERVAL_MS));
+        for (int i = 0; i < intervalValues.length; i++) {
+            if (intervalValues[i] == savedIntervalMs) { savedIntervalIndex = i; break; }
+        }
         mPollingIntervalsSpinner = (Spinner) v.findViewById(R.id.polling_intervals_spinner);
         mPollingIntervalsSpinner.setEnabled(!mNetwork.isSlaveMode());
         mPollingIntervalsSpinner.setAdapter(new ArrayAdapter<>(mContext, R.layout.spinner_item, intervalTexts));
-        mPollingIntervalsSpinner.setSelection(LocalPreferences.getInt(Pref.POLLING_INTERVAL_INDEX, 2));
+        mPollingIntervalsSpinner.setSelection(savedIntervalIndex);
         mPollingIntervalsSpinner.setOnItemSelectedListener(new AdapterView.OnItemSelectedListener() {
             @Override
             public void onItemSelected(AdapterView<?> parent, View view, int position, long id) {
@@ -268,7 +276,7 @@ public class MainFragment extends Fragment {
                 if (selectedItem != null) {
                     long pollingIntervalMs = Long.valueOf(selectedItem.toString()).longValue();
                     mNetwork.getDeviceStatePoller().setPollIntervalMs(pollingIntervalMs);
-                    LocalPreferences.putInt(Pref.POLLING_INTERVAL_INDEX, position);
+                    LocalPreferences.putInt(Pref.POLLING_INTERVAL_MS, (int) pollingIntervalMs);
                 }
             }
             @Override

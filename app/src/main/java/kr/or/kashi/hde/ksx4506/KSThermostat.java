@@ -32,6 +32,8 @@ import kr.or.kashi.hde.ksx4506.KSDeviceContextBase;
 import kr.or.kashi.hde.ksx4506.KSPacket;
 import kr.or.kashi.hde.ksx4506.KSUtils;
 
+import java.util.ArrayList;
+import java.util.List;
 import java.util.Map;
 
 /**
@@ -55,6 +57,9 @@ public class KSThermostat extends KSDeviceContextBase {
     public static final int CMD_REPEAT_MODE_RSP = 0xC9;
     public static final int CMD_HOTWATER_ONLY_REQ = 0x47;
     public static final int CMD_HOTWATER_ONLY_RSP = 0xC7;
+
+    // KASH B1101-8:2024: status/characteristic error code that indicates a water leak.
+    private static final int ERROR_LEAK_DETECTED = 0xEE;
 
     private static final int TIMER_MODE_OFF = 0x00;
     private static final int TIMER_MODE_ON = 0x01;
@@ -109,6 +114,7 @@ public class KSThermostat extends KSDeviceContextBase {
             supportedFunctions |= Thermostat.Function.HOTWATER_ONLY;
             supportedFunctions |= Thermostat.Function.RESERVED_MODE;
             supportedFunctions |= Thermostat.Function.REPEAT_MODE;
+            supportedFunctions |= Thermostat.Function.LEAK_ALARM;
             mRxPropertyMap.put(Thermostat.PROP_SUPPORTED_FUNCTIONS, supportedFunctions);
             mRxPropertyMap.put(Thermostat.PROP_MIN_TEMPERATURE, mMinTemperature);
             mRxPropertyMap.put(Thermostat.PROP_MAX_TEMPERATURE, mMaxTemperature);
@@ -178,9 +184,33 @@ public class KSThermostat extends KSDeviceContextBase {
         return PARSE_OK_STATE_UPDATED;
     }
 
-    protected void makeStatusRspData(PropertyMap props, ByteArrayBuffer outData) {
-        outData.append(0); // no error
+    /**
+     * Returns the thermostats that belong to the same group (master) as this context,
+     * in ascending order of sub-id. The group context returns its children; a single
+     * thermostat returns the siblings held by its parent, or itself if it has no parent.
+     */
+    private List<KSThermostat> getGroupMembers() {
+        final List<KSThermostat> members = new ArrayList<>();
+        if (hasChild()) {
+            members.addAll(getChildren(KSThermostat.class));
+        } else if (getParent() != null && getParent().hasChild()) {
+            members.addAll(getParent().getChildren(KSThermostat.class));
+        } else {
+            members.add(this);
+        }
+        return members;
+    }
 
+    /**
+     * Encodes the status response (KASH B1101-8:2024 5.3) that is also used as the
+     * response of every control request (5.9, 5.11, ...). {@code props} holds the
+     * (possibly uncommitted) properties of this context; other members of the group
+     * are read from their committed property maps.
+     */
+    protected void makeStatusRspData(PropertyMap props, ByteArrayBuffer outData) {
+        final List<KSThermostat> members = getGroupMembers();
+
+        int errorCode     = 0;
         int heatingState  = 0;
         int coolingState  = 0;  // not used
         int outingSetting = 0;
@@ -189,30 +219,32 @@ public class KSThermostat extends KSDeviceContextBase {
         int repeatMode    = 0;
         int devIndex = 0;
 
-        for (KSThermostat child: getChildren(KSThermostat.class)) {
-            final PropertyMap childProps = child.getReadPropertyMap();
-            final long curStates = childProps.get(Thermostat.PROP_FUNCTION_STATES, Long.class);
+        for (KSThermostat member: members) {
+            final PropertyMap memberProps = (member == this) ? props : member.getReadPropertyMap();
+            final long curStates = memberProps.get(Thermostat.PROP_FUNCTION_STATES, Long.class);
             if ((curStates & Thermostat.Function.HEATING) != 0) heatingState |= (1 << devIndex);
             if ((curStates & Thermostat.Function.OUTING_SETTING) != 0) outingSetting |= (1 << devIndex);
             if ((curStates & Thermostat.Function.HOTWATER_ONLY) != 0) hotwaterOnly |= (1 << devIndex);
             if ((curStates & Thermostat.Function.RESERVED_MODE) != 0) reservedMode |= (1 << devIndex);
             if ((curStates & Thermostat.Function.REPEAT_MODE) != 0) repeatMode |= (1 << devIndex);
+            if ((curStates & Thermostat.Function.LEAK_ALARM) != 0) errorCode = ERROR_LEAK_DETECTED;
             devIndex++;
         }
 
+        outData.append(errorCode);
         outData.append(heatingState);
         outData.append(outingSetting);
         outData.append(reservedMode);
         outData.append(hotwaterOnly);
         outData.append(repeatMode);
 
-        for (KSThermostat child: getChildren(KSThermostat.class)) {
-            final PropertyMap childProps = child.getReadPropertyMap();
-            final float tempRes = childProps.get(Thermostat.PROP_TEMP_RESOLUTION, Float.class);
-            final float minTemp = childProps.get(Thermostat.PROP_MIN_TEMPERATURE, Float.class);
-            final float maxTemp = childProps.get(Thermostat.PROP_MAX_TEMPERATURE, Float.class);
-            final float setTemp = childProps.get(Thermostat.PROP_SETTING_TEMPERATURE, Float.class);
-            final float curTemp = childProps.get(Thermostat.PROP_CURRENT_TEMPERATURE, Float.class);
+        for (KSThermostat member: members) {
+            final PropertyMap memberProps = (member == this) ? props : member.getReadPropertyMap();
+            final float tempRes = memberProps.get(Thermostat.PROP_TEMP_RESOLUTION, Float.class);
+            final float minTemp = memberProps.get(Thermostat.PROP_MIN_TEMPERATURE, Float.class);
+            final float maxTemp = memberProps.get(Thermostat.PROP_MAX_TEMPERATURE, Float.class);
+            final float setTemp = memberProps.get(Thermostat.PROP_SETTING_TEMPERATURE, Float.class);
+            final float curTemp = memberProps.get(Thermostat.PROP_CURRENT_TEMPERATURE, Float.class);
             outData.append(KSUtils.makeTemperatureByte(setTemp, minTemp, maxTemp, tempRes));
             outData.append(KSUtils.makeTemperatureByte(curTemp, minTemp, maxTemp, tempRes));
         }
@@ -226,11 +258,14 @@ public class KSThermostat extends KSDeviceContextBase {
         }
 
         final int error = packet.data[0] & 0xFF;
-        if (error != 0) {
+        final boolean leakDetected = (error == ERROR_LEAK_DETECTED);
+        if (error != 0 && !leakDetected) {
             if (DBG) Log.d(TAG, "parse-status-rsp: error occurred! " + error);
             onErrorOccurred(HomeDevice.Error.UNKNOWN);
             return PARSE_OK_ERROR_RECEIVED;
         }
+        // KASH B1101-8:2024: 0xEE means the leak is detected, the rest of the state
+        // data is still valid so keep parsing and reflect it as the LEAK_ALARM state.
 
         int controllerCount = (int)((packet.data.length - 6) / 2);
         if (controllerCount <= 0) {
@@ -276,10 +311,28 @@ public class KSThermostat extends KSDeviceContextBase {
         if (reservedMode) newStates |= Thermostat.Function.RESERVED_MODE;
         if (hotwaterOnly) newStates |= Thermostat.Function.HOTWATER_ONLY;
         if (repeatMode) newStates |= Thermostat.Function.REPEAT_MODE;
+        if (leakDetected) newStates |= Thermostat.Function.LEAK_ALARM;
 
         if (newStates != curStates) {
             outProps.put(Thermostat.PROP_FUNCTION_STATES, newStates);
             result = PARSE_OK_STATE_UPDATED;
+        }
+
+        if (isMaster() && packet.commandType == CMD_STATUS_RSP) {
+            // KASH B1101-8:2024 5.3 NOTE 2: the status response carries only the on/off
+            // bits of the reserved/repeat modes. When a mode is on but its time is not
+            // known yet (or the state has just changed), query it individually with
+            // 0x48/0x49 LENGTH 0x00 using this thermostat's own sub-id (0x*1~0x*8).
+            final boolean reservedChanged = ((curStates ^ newStates) & Thermostat.Function.RESERVED_MODE) != 0;
+            final boolean repeatChanged = ((curStates ^ newStates) & Thermostat.Function.REPEAT_MODE) != 0;
+            final int reservedHour = outProps.get(Thermostat.PROP_RESERVED_HOUR, Integer.class);
+            final int repeatHour = outProps.get(Thermostat.PROP_REPEAT_HOUR, Integer.class);
+            if (reservedMode && (reservedChanged || reservedHour == TIMER_HOUR_DISABLED)) {
+                sendPacket(createPacket(CMD_RESERVED_MODE_REQ));
+            }
+            if (repeatMode && (repeatChanged || repeatHour == TIMER_HOUR_DISABLED)) {
+                sendPacket(createPacket(CMD_REPEAT_MODE_REQ));
+            }
         }
 
         final float settingTemp = outProps.get(Thermostat.PROP_SETTING_TEMPERATURE, Float.class);
@@ -324,6 +377,7 @@ public class KSThermostat extends KSDeviceContextBase {
         if ((supportedFunctions & Thermostat.Function.HOTWATER_ONLY) != 0L)  data5 |= (1 << 2);
         if ((supportedFunctions & Thermostat.Function.RESERVED_MODE) != 0L)  data5 |= (1 << 3);
         if ((supportedFunctions & Thermostat.Function.REPEAT_MODE) != 0L)    data5 |= (1 << 5);
+        if ((supportedFunctions & Thermostat.Function.LEAK_ALARM) != 0L)     data5 |= (1 << 6);
         final float tempRes = props.get(Thermostat.PROP_TEMP_RESOLUTION, Float.class);
         if (KSUtils.floatEquals(tempRes, 0.5f))                              data5 |= (1 << 4);
         data.append(data5);
@@ -337,13 +391,13 @@ public class KSThermostat extends KSDeviceContextBase {
 
     @Override
     protected @ParseResult int parseCharacteristicRsp(KSPacket packet, PropertyMap outProps) {
-        if (packet.data.length < 2) {
+        if (packet.data.length < 7) { // error, company, method, max, min, functions, count
             if (DBG) Log.w(TAG, "parse-chr-rsp: wrong size of data " + packet.data.length);
             return PARSE_ERROR_MALFORMED_PACKET;
         }
 
         final int error = packet.data[0] & 0xFF;
-        if (error != 0) {
+        if (error != 0 && error != ERROR_LEAK_DETECTED) {
             if (DBG) Log.d(TAG, "parse-chr-rsp: error occurred! " + error);
             onErrorOccurred(HomeDevice.Error.UNKNOWN);
             return PARSE_OK_ERROR_RECEIVED;
@@ -370,6 +424,7 @@ public class KSThermostat extends KSDeviceContextBase {
         if ((data5 & (1 << 2)) != 0) supportedFunctions |= (Thermostat.Function.HOTWATER_ONLY);
         if ((data5 & (1 << 3)) != 0) supportedFunctions |= (Thermostat.Function.RESERVED_MODE);
         if ((data5 & (1 << 5)) != 0) supportedFunctions |= (Thermostat.Function.REPEAT_MODE);
+        if ((data5 & (1 << 6)) != 0) supportedFunctions |= (Thermostat.Function.LEAK_ALARM);
         if ((data5 & (1 << 4)) != 0) mSupportHalfDegree = true;
 
         outProps.put(Thermostat.PROP_SUPPORTED_FUNCTIONS, supportedFunctions);

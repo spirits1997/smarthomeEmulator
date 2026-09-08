@@ -50,7 +50,7 @@ public class VentilationView extends HomeDeviceView<Ventilation> {
     private CheckBox mAlarmFanOverHeatingCheck;
     private CheckBox mAlarmRecyclerChangeCheck;
     private CheckBox mAlarmFilterChangeCheck;
-    private CheckBox mAlarmSmokeRemovingCheck;
+    private CheckBox mAlarmFilterCleaningCheck;
     private CheckBox mAlarmHighCo2LevelCheck;
     private CheckBox mAlarmHeaterRunningCheck;
     private CheckBox mFanSpeedCheck;
@@ -102,9 +102,9 @@ public class VentilationView extends HomeDeviceView<Ventilation> {
         mAlarmFilterChangeCheck = findViewById(R.id.alarm_filter_change_check);
         mAlarmFilterChangeCheck.setOnClickListener(v -> setOperationAlarms());
         mAlarmFilterChangeCheck.setClickable(isSlave());
-        mAlarmSmokeRemovingCheck = findViewById(R.id.alarm_smoke_removing_check);
-        mAlarmSmokeRemovingCheck.setOnClickListener(v -> setOperationAlarms());
-        mAlarmSmokeRemovingCheck.setClickable(isSlave());
+        mAlarmFilterCleaningCheck = findViewById(R.id.alarm_filter_cleaning_check);
+        mAlarmFilterCleaningCheck.setOnClickListener(v -> setOperationAlarms());
+        mAlarmFilterCleaningCheck.setClickable(isSlave());
         mAlarmHighCo2LevelCheck = findViewById(R.id.alarm_high_co2_level_check);
         mAlarmHighCo2LevelCheck.setOnClickListener(v -> setOperationAlarms());
         mAlarmHighCo2LevelCheck.setClickable(isSlave());
@@ -166,7 +166,7 @@ public class VentilationView extends HomeDeviceView<Ventilation> {
         mAlarmFanOverHeatingCheck.setChecked((operationAlarms & Ventilation.Alarm.FAN_OVERHEATING) != 0);
         mAlarmRecyclerChangeCheck.setChecked((operationAlarms & Ventilation.Alarm.RECYCLER_CHANGE) != 0);
         mAlarmFilterChangeCheck.setChecked((operationAlarms & Ventilation.Alarm.FILTER_CHANGE) != 0);
-        mAlarmSmokeRemovingCheck.setChecked((operationAlarms & Ventilation.Alarm.SMOKE_REMOVING) != 0);
+        mAlarmFilterCleaningCheck.setChecked((operationAlarms & Ventilation.Alarm.FILTER_CLEANING) != 0);
         mAlarmHighCo2LevelCheck.setChecked((operationAlarms & Ventilation.Alarm.HIGH_CO2_LEVEL) != 0);
         mAlarmHeaterRunningCheck.setChecked((operationAlarms & Ventilation.Alarm.HEATER_RUNNING) != 0);
 
@@ -213,7 +213,7 @@ public class VentilationView extends HomeDeviceView<Ventilation> {
         if (mAlarmFanOverHeatingCheck.isChecked()) operationAlarms |= Ventilation.Alarm.FAN_OVERHEATING;
         if (mAlarmRecyclerChangeCheck.isChecked()) operationAlarms |= Ventilation.Alarm.RECYCLER_CHANGE;
         if (mAlarmFilterChangeCheck.isChecked()) operationAlarms |= Ventilation.Alarm.FILTER_CHANGE;
-        if (mAlarmSmokeRemovingCheck.isChecked()) operationAlarms |= Ventilation.Alarm.SMOKE_REMOVING;
+        if (mAlarmFilterCleaningCheck.isChecked()) operationAlarms |= Ventilation.Alarm.FILTER_CLEANING;
         if (mAlarmHighCo2LevelCheck.isChecked()) operationAlarms |= Ventilation.Alarm.HIGH_CO2_LEVEL;
         if (mAlarmHeaterRunningCheck.isChecked()) operationAlarms |= Ventilation.Alarm.HEATER_RUNNING;
         device().setProperty(Ventilation.PROP_OPERATION_ALARM, Long.class, operationAlarms);

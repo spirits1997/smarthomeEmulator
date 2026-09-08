@@ -45,6 +45,7 @@ public class LocalPreferences {
         public static final String DEBUG_LOG_EVENT_ENABLED = "debug_log_event_enabled";
         public static final String DEBUG_LOG_TXRX_ENABLED = "debug_log_txrx_enabled";
         public static final String POLLING_INTERVAL_INDEX = "polling_interval_index";
+        public static final String POLLING_INTERVAL_MS = "polling_interval_ms";
     };
 
     private static SharedPreferences sSharedPreferences = null;

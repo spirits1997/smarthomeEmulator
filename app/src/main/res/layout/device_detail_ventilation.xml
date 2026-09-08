@@ -150,10 +150,10 @@
                 android:text="FILTER_CHANGE" />
 
             <CheckBox
-                android:id="@+id/alarm_smoke_removing_check"
+                android:id="@+id/alarm_filter_cleaning_check"
                 android:layout_width="wrap_content"
                 android:layout_height="wrap_content"
-                android:text="SMOKE_REMOVING" />
+                android:text="FILTER_CLEANING" />
 
             <CheckBox
                 android:id="@+id/alarm_high_co2_level_check"

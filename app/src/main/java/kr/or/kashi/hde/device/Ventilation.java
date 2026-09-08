@@ -65,7 +65,7 @@ public class Ventilation extends HomeDevice {
         long FAN_OVERHEATING    = 1L << 0; // Fan is overheated
         long RECYCLER_CHANGE    = 1L << 1; // Needs change of recycler
         long FILTER_CHANGE      = 1L << 2; // Needs change of filter
-        long SMOKE_REMOVING     = 1L << 3; // Removing smoke is in progress
+        long FILTER_CLEANING    = 1L << 3; // Needs cleaning of filter (KASH B1101-3:2024, replaced smoke-removing)
         long HIGH_CO2_LEVEL     = 1L << 4; // CO2 level is high
         long HEATER_RUNNING     = 1L << 5; // Heater is running
     }

@@ -77,6 +77,12 @@
                 android:layout_height="wrap_content"
                 android:text="REPEAT_MODE" />
 
+            <CheckBox
+                android:id="@+id/function_leak_alarm_check"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="LEAK_ALARM" />
+
         </kr.or.kashi.hde.widget.FlowLayout>
 
     </LinearLayout>

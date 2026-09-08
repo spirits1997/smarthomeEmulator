@@ -44,6 +44,7 @@ public class ThermostatView extends HomeDeviceView<Thermostat> {
     private CheckBox mHotwaterOnlyCheck;
     private CheckBox mReservedModeCheck;
     private CheckBox mRepeatModeCheck;
+    private CheckBox mLeakAlarmCheck;
     private EditText mReservedHourEdit;
     private EditText mReservedMinuteEdit;
     private Button mReservedSetButton;
@@ -81,6 +82,11 @@ public class ThermostatView extends HomeDeviceView<Thermostat> {
         mReservedModeCheck.setOnClickListener(v -> setReservedTimer());
         mRepeatModeCheck = findViewById(R.id.function_repeat_mode_check);
         mRepeatModeCheck.setOnClickListener(v -> setRepeatTimer());
+        // Leak alarm is a state reported by the device (status error 0xEE), so it is
+        // only toggleable in slave(device) mode to simulate the leak.
+        mLeakAlarmCheck = findViewById(R.id.function_leak_alarm_check);
+        mLeakAlarmCheck.setOnClickListener(v -> setFunctionBit(Thermostat.Function.LEAK_ALARM, mLeakAlarmCheck.isChecked()));
+        mLeakAlarmCheck.setClickable(isSlave());
         mReservedHourEdit = findViewById(R.id.reserved_hour_edit);
         mReservedMinuteEdit = findViewById(R.id.reserved_minute_edit);
         mReservedSetButton = findViewById(R.id.reserved_set_button);
@@ -109,6 +115,7 @@ public class ThermostatView extends HomeDeviceView<Thermostat> {
         mHotwaterOnlyCheck.setEnabled((supportedFunctions & Thermostat.Function.HOTWATER_ONLY) != 0);
         mReservedModeCheck.setEnabled((supportedFunctions & Thermostat.Function.RESERVED_MODE) != 0);
         mRepeatModeCheck.setEnabled((supportedFunctions & Thermostat.Function.REPEAT_MODE) != 0);
+        mLeakAlarmCheck.setEnabled((supportedFunctions & Thermostat.Function.LEAK_ALARM) != 0);
 
         final long functionStates = props.get(Thermostat.PROP_FUNCTION_STATES, Long.class);
         mHeatingCheck.setChecked((functionStates & Thermostat.Function.HEATING) != 0);
@@ -117,6 +124,7 @@ public class ThermostatView extends HomeDeviceView<Thermostat> {
         mHotwaterOnlyCheck.setChecked((functionStates & Thermostat.Function.HOTWATER_ONLY) != 0);
         mReservedModeCheck.setChecked((functionStates & Thermostat.Function.RESERVED_MODE) != 0);
         mRepeatModeCheck.setChecked((functionStates & Thermostat.Function.REPEAT_MODE) != 0);
+        mLeakAlarmCheck.setChecked((functionStates & Thermostat.Function.LEAK_ALARM) != 0);
 
         if (!mReservedHourEdit.hasFocus()) mReservedHourEdit.setText("" + props.get(Thermostat.PROP_RESERVED_HOUR, Integer.class));
         if (!mReservedMinuteEdit.hasFocus()) mReservedMinuteEdit.setText("" + props.get(Thermostat.PROP_RESERVED_MINUTE, Integer.class));
@@ -144,6 +152,7 @@ public class ThermostatView extends HomeDeviceView<Thermostat> {
         if (mHotwaterOnlyCheck.isChecked()) functions |= Thermostat.Function.HOTWATER_ONLY;
         if (mReservedModeCheck.isChecked()) functions |= Thermostat.Function.RESERVED_MODE;
         if (mRepeatModeCheck.isChecked()) functions |= Thermostat.Function.REPEAT_MODE;
+        if (mLeakAlarmCheck.isChecked()) functions |= Thermostat.Function.LEAK_ALARM;
         device().setProperty(Thermostat.PROP_FUNCTION_STATES, Long.class,  functions);
     }
 
